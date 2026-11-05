@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>weather lines</title>
+<meta name="description" content="a quiet, monochrome 10-day ensemble forecast">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #ffffff; --ink: #111111; --ink-rgb: 17, 17, 17;
+  --muted: #5f5f5f; --grid: #e4e4e4; --night: #f4f4f4;
+  --member-opacity: 0.24; --member-width: 1; --mean-width: 2;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f0f0f; --ink: #f2f2f2; --ink-rgb: 242, 242, 242;
+    --muted: #a3a3a3; --grid: #2a2a2a; --night: #181818;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f0f0f; --ink: #f2f2f2; --ink-rgb: 242, 242, 242;
+  --muted: #a3a3a3; --grid: #2a2a2a; --night: #181818;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: 'IBM Plex Sans', system-ui, sans-serif; }
+.mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 32px 16px 40px; display: flex; flex-direction: column; gap: 28px; }
+
+header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 24px; }
+h1 { margin: 0; font-size: 28px; font-weight: 500; letter-spacing: -0.01em; }
+.status { margin-top: 6px; font-size: 14px; line-height: 1.5; color: var(--muted); }
+.current { display: flex; align-items: flex-end; gap: 24px; }
+.big { font-size: 72px; line-height: 0.9; letter-spacing: -0.04em; }
+.side { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+
+/* a changed value: quick tint up, slow fade out */
+.v { border-radius: 4px; padding: 0 4px; margin: 0 -4px; }
+.big.v { border-radius: 8px; }
+.pulse { animation: tint 1.7s; }
+@keyframes tint {
+  0%   { background-color: rgba(var(--ink-rgb), 0);   animation-timing-function: ease-out; }
+  10%  { background-color: rgba(var(--ink-rgb), 0.2); animation-timing-function: ease-in-out; }
+  100% { background-color: rgba(var(--ink-rgb), 0); }
+}
+@media (prefers-reduced-motion: reduce) { .pulse { animation-duration: 0.01s; } }
+
+.menu-wrap { position: relative; display: inline-block; }
+.model-btn { font: inherit; color: inherit; background: none; border: 0; padding: 12px 4px; margin: -12px -4px; cursor: pointer;
+  text-decoration: underline; text-decoration-color: var(--grid); text-underline-offset: 4px; }
+.menu { position: absolute; left: -10px; top: calc(100% + 12px); z-index: 5; width: 240px; background: var(--bg);
+  border: 1px solid var(--grid); border-radius: 10px; padding: 6px; display: flex; flex-direction: column; gap: 2px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); }
+.menu[hidden] { display: none; }
+.menu button { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; min-height: 44px;
+  padding: 0 12px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); cursor: pointer; text-align: left;
+  font: 400 13px/1.2 'IBM Plex Mono', ui-monospace, monospace; }
+.menu button[aria-checked="true"] { background: var(--night); font-weight: 500; }
+.menu button span + span { color: var(--muted); }
+
+.days { position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 10px 0; margin: -10px 0;
+  border-bottom: 1px solid var(--grid); display: flex; gap: 12px; }
+.spacer { width: 36px; flex: none; }
+.days-grid { flex: 1; min-width: 0; display: grid; }
+.day { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding-left: 6px; border-left: 1px solid var(--grid); min-width: 0; overflow: hidden; }
+.day b { font-size: 13px; font-weight: 500; white-space: nowrap; }
+.day span { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.sm { display: none; }
+/* ten columns get narrow on a phone: short day names, bare dates, hi over lo */
+@media (max-width: 600px) {
+  .lg { display: none; }
+  .sm { display: inline; }
+  .day { padding-left: 3px; }
+  .day .hl { line-height: 1.25; }
+}
+
+.panel { display: flex; flex-direction: column; gap: 10px; }
+.phead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; padding-left: 48px; }
+h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+h2 small { font-size: 13px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--muted); }
+.readout { font-size: 13px; color: var(--muted); }
+.readout .val { color: var(--ink); font-size: 15px; }
+.pbody { display: flex; gap: 12px; }
+.yax { width: 36px; flex: none; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; font-size: 11px; color: var(--muted); }
+.yax span { height: 0; display: flex; align-items: center; }
+.chart { flex: 1; min-width: 0; position: relative; padding-bottom: 22px; cursor: crosshair; touch-action: pan-y; outline-offset: 4px; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.tag { position: absolute; bottom: 0; font-size: 11px; line-height: 18px; white-space: nowrap; padding: 0 6px; color: var(--bg); background: var(--ink); border-radius: 3px; pointer-events: none; }
+.night { fill: var(--night); }
+.gridl { fill: none; stroke: var(--grid); stroke-width: 1; }
+.member { fill: none; stroke: rgba(var(--ink-rgb), var(--member-opacity)); stroke-width: var(--member-width); stroke-linejoin: round; }
+.mean { fill: none; stroke: var(--ink); stroke-width: var(--mean-width); stroke-linejoin: round; stroke-linecap: round; }
+.nowl { fill: none; stroke: var(--ink); stroke-width: 1; stroke-dasharray: 3 3; }
+
+.msg { padding: 48px 0; font-size: 14px; color: var(--muted); text-align: center; }
+footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; padding-top: 16px; border-top: 1px solid var(--grid); font-size: 12px; color: var(--muted); }
+footer a { color: var(--muted); }
+footer a:hover { color: var(--ink); }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; width: 100%; }
+.legend span { display: flex; align-items: center; gap: 6px; }
+.err { color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1 id="place">seattle, wa</h1>
+      <div class="status">
+        <span class="v" data-k="date" id="date">&nbsp;</span> ·
+        <span class="v" data-k="time" id="time">&nbsp;</span> ·
+        <span class="menu-wrap">
+          <button type="button" class="model-btn" id="modelBtn" aria-haspopup="true" aria-expanded="false" aria-controls="menu"><span id="modelLabel">noaa gfs ensemble</span> ▾</button>
+          <div class="menu" id="menu" role="menu" aria-label="forecast model" hidden></div>
+        </span>
+      </div>
+    </div>
+    <div class="current mono">
+      <div class="big v" data-k="temp" id="nowTemp">–</div>
+      <div class="side">
+        <span>hi <span class="v" data-k="hi" id="nowHi">–</span> · lo <span class="v" data-k="lo" id="nowLo">–</span></span>
+        <span>wind <span class="v" data-k="wind" id="nowWind">–</span> mph</span>
+        <span>clouds <span class="v" data-k="cloud" id="nowCloud">–</span></span>
+        <span>rain <span class="v" data-k="rain" id="nowRain">–</span> in/hr</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="days" id="days" hidden>
+    <div class="spacer"></div>
+    <div class="days-grid" id="daysGrid"></div>
+  </div>
+
+  <main id="panels"><div class="msg" id="msg">loading forecast…</div></main>
+
+  <footer>
+    <div class="legend" aria-hidden="true">
+      <span><svg width="24" height="10" viewBox="0 0 24 10"><path d="M0 7 L8 4 L16 6 L24 2" fill="none" stroke="currentColor" stroke-opacity=".45"/><path d="M0 4 L8 6 L16 3 L24 5" fill="none" stroke="currentColor" stroke-opacity=".45"/></svg>each model run</span>
+      <span><svg width="24" height="10" viewBox="0 0 24 10"><path d="M0 5 L24 5" fill="none" stroke="var(--ink)" stroke-width="2"/></svg>average of all runs</span>
+      <span><svg width="12" height="10" viewBox="0 0 12 10"><rect width="12" height="10" fill="var(--night)" stroke="var(--grid)"/></svg>night</span>
+      <span>dashed line = now</span>
+    </div>
+    <span><a href="https://open-meteo.com/">weather data by open-meteo.com</a> (cc by 4.0) · <span id="fetched">not yet updated</span></span>
+    <span>hover or drag a panel, or focus one and use ← → (shift = a day), to read any hour</span>
+  </footer>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---- settings (override with ?lat=&lon=&name=&model=&theme=) ----
+  const qs = new URLSearchParams(location.search);
+  const num = (k) => { const v = parseFloat(qs.get(k)); return Number.isFinite(v) ? v : null; };
+  const LOC = {
+    lat: num('lat') ?? 47.6062,
+    lon: num('lon') ?? -122.3321,
+    name: qs.get('name') || (qs.has('lat') ? 'custom location' : 'seattle, wa')
+  };
+  const theme = qs.get('theme');
+  if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
+
+  const MODELS = [
+    { key: 'gfs025', label: 'noaa gfs', runs: 31 },
+    { key: 'ecmwf_ifs025', label: 'ecmwf', runs: 51 },
+    { key: 'google_weathernext2_ensemble', label: 'weathernext 2', runs: 64 }
+  ];
+  let modelKey = MODELS.some((m) => m.key === qs.get('model')) ? qs.get('model') : MODELS[0].key;
+
+  const VARS = [
+    { key: 'temp', api: 'temperature_2m', title: 'temperature', unit: '°f', h: 180, fmt: (v) => Math.round(v) + '°' },
+    { key: 'rain', api: 'precipitation', title: 'precipitation', unit: 'in / hr', h: 120, fmt: (v) => v.toFixed(2) },
+    { key: 'wind', api: 'wind_speed_10m', title: 'wind', unit: 'mph', h: 120, fmt: (v) => String(Math.round(v)) },
+    { key: 'cloud', api: 'cloud_cover', title: 'cloud cover', unit: '%', h: 120, fmt: (v) => Math.round(v) + '%' }
+  ];
+
+  const DAYS = 10;
+  const CLOCK_MS = 60 * 1000;        // clock, now line and readouts
+  const FETCH_MS = 30 * 60 * 1000;   // new forecast data
+  const WD = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const MO = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+
+  const $ = (id) => document.getElementById(id);
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+  // ---- state ----
+  let D = null;              // parsed forecast
+  let hover = null;          // hour index under the cursor
+  let glide = null;          // fractional hour while easing back to now
+  let leaveT = null, raf = null;
+  let prevVals = null;       // last refresh's values, for change pulses
+  let lastFetch = 0;
+  let loading = false;
+
+  // ---- time helpers: "local" ms = wall-clock time at the forecast location, stored as if utc ----
+  const parseLocal = (s) => Date.parse((s.length === 16 ? s + ':00' : s) + 'Z');
+  const localNow = () => Date.now() + (D ? D.offset : 0) * 1000;
+  const nowHour = () => (localNow() - D.t0) / 3.6e6;
+  const fmtTime = (ms) => { const d = new Date(ms); const h = d.getUTCHours(); return (h % 12 || 12) + ':' + String(d.getUTCMinutes()).padStart(2, '0') + ' ' + (h < 12 ? 'am' : 'pm'); };
+  const fmtHour = (ms) => { const d = new Date(ms); const h = d.getUTCHours(); return WD[d.getUTCDay()].slice(0, 3) + ' ' + (h % 12 || 12) + ' ' + (h < 12 ? 'am' : 'pm'); };
+  const fmtDate = (ms) => { const d = new Date(ms); return WD[d.getUTCDay()] + ', ' + MO[d.getUTCMonth()] + ' ' + d.getUTCDate(); };
+
+  // ---- data ----
+  async function getJSON(url) {
+    const r = await fetch(url);
+    if (!r.ok) {
+      let why = 'http ' + r.status;
+      try { const j = await r.json(); if (j && j.reason) why += ': ' + j.reason; } catch (e) { /* no body */ }
+      throw new Error(why);
+    }
+    return r.json();
+  }
+
+  async function fetchForecast(model) {
+    const ens = new URLSearchParams({
+      latitude: LOC.lat, longitude: LOC.lon, models: model.key,
+      hourly: VARS.map((v) => v.api).join(','),
+      temperature_unit: 'fahrenheit', wind_speed_unit: 'mph', precipitation_unit: 'inch',
+      timezone: 'auto', forecast_days: String(DAYS)
+    });
+    const sun = new URLSearchParams({
+      latitude: LOC.lat, longitude: LOC.lon, daily: 'sunrise,sunset', timezone: 'auto', forecast_days: String(DAYS + 1)
+    });
+    const [e, s] = await Promise.all([
+      getJSON('https://ensemble-api.open-meteo.com/v1/ensemble?' + ens),
+      getJSON('https://api.open-meteo.com/v1/forecast?' + sun).catch(() => null)
+    ]);
+    return parse(e, s, model);
+  }
+
+  function extent(rows) {
+    let mn = Infinity, mx = -Infinity;
+    for (const row of rows) for (const v of row) if (v !== null && Number.isFinite(v)) { if (v < mn) mn = v; if (v > mx) mx = v; }
+    return Number.isFinite(mn) ? [mn, mx] : [0, 1];
+  }
+
+  // y scale with four equal steps so the five gridlines get round labels
+  function scaleFor(key, rows) {
+    const [mn, mx] = extent(rows);
+    let lo = 0, step;
+    if (key === 'temp') { lo = Math.floor(mn) - 1; step = Math.max(1, Math.ceil((mx + 1 - lo) / 4)); }
+    else if (key === 'rain') { step = Math.max(0.01, Math.ceil(Math.max(mx, 0) * 100 / 4) / 100); }
+    else if (key === 'wind') { step = Math.max(2, Math.ceil((Math.max(mx, 0) + 1) / 4)); }
+    else { step = 25; }
+    const labels = [];
+    for (let q = 4; q >= 0; q--) {
+      const v = lo + q * step;
+      labels.push(key === 'rain' ? (v === 0 ? '0' : v.toFixed(2).replace(/^0/, '')) : String(Math.round(v)));
+    }
+    return { lo, hi: lo + 4 * step, labels };
+  }
+
+  function parse(ens, sun, model) {
+    const hourly = ens && ens.hourly;
+    if (!hourly || !Array.isArray(hourly.time) || !hourly.time.length) throw new Error('no hourly data in the response');
+    const H = hourly.time.length;
+    const t0 = parseLocal(hourly.time[0]);
+    const vars = {};
+    for (const v of VARS) {
+      // control run is "<var>", the others are "<var>_member01" … "<var>_memberNN"
+      const keys = Object.keys(hourly).filter((k) => k === v.api || k.startsWith(v.api + '_member')).sort();
+      const members = keys.map((k) => hourly[k]).filter((a) => Array.isArray(a) && a.some((x) => x !== null));
+      const mean = new Array(H).fill(null);
+      for (let i = 0; i < H; i++) {
+        let s = 0, n = 0;
+        for (const m of members) { const x = m[i]; if (x !== null && Number.isFinite(x)) { s += x; n++; } }
+        if (n) mean[i] = s / n;
+      }
+      vars[v.key] = { members, mean, scale: scaleFor(v.key, members.length ? members : [mean]) };
+    }
+    const nights = [];
+    if (sun && sun.daily && sun.daily.sunrise) {
+      const rise = sun.daily.sunrise.map((s) => (parseLocal(s) - t0) / 3.6e6);
+      const set = sun.daily.sunset.map((s) => (parseLocal(s) - t0) / 3.6e6);
+      nights.push([0, rise[0]]);
+      for (let d = 0; d < set.length; d++) nights.push([set[d], d + 1 < rise.length ? rise[d + 1] : H]);
+    }
+    const days = [];
+    for (let d = 0; d < Math.ceil(H / 24); d++) {
+      const dt = new Date(t0 + d * 864e5);
+      days.push({ name: WD[dt.getUTCDay()].slice(0, 3), date: MO[dt.getUTCMonth()].slice(0, 3) + ' ' + dt.getUTCDate() });
+    }
+    return {
+      model, H, t0, offset: ens.utc_offset_seconds || 0, vars,
+      nights: nights.map(([a, b]) => [clamp(a, 0, H), clamp(b, 0, H)]).filter(([a, b]) => b > a),
+      days, runs: vars.temp.members.length
+    };
+  }
+
+  // ---- drawing ----
+  const X = (i) => (i / D.H * 1000).toFixed(1);
+  function linePath(arr, sc) {
+    let d = '', pen = false;
+    for (let i = 0; i < arr.length; i++) {
+      const v = arr[i];
+      if (v === null || !Number.isFinite(v)) { pen = false; continue; }
+      const y = clamp(100 - (v - sc.lo) / (sc.hi - sc.lo) * 100, 0, 100).toFixed(1);
+      d += (pen ? ' L' : ' M') + X(i) + ' ' + y;
+      pen = true;
+    }
+    return d.trim();
+  }
+
+  function build() {
+    $('place').textContent = LOC.name;
+    document.title = LOC.name + ' · weather lines';
+
+    const grid = $('daysGrid');
+    grid.style.gridTemplateColumns = 'repeat(' + D.days.length + ', minmax(0, 1fr))';
+    grid.innerHTML = D.days.map((d, k) =>
+      '<div class="day"><b><span class="lg">' + d.name + '</span><span class="sm">' + d.name.slice(0, 2) + '</span></b>' +
+      '<span class="mono"><span class="lg">' + d.date + '</span><span class="sm">' + d.date.split(' ')[1] + '</span></span>' +
+      '<span class="mono v hl" data-k="d' + k + '"></span></div>').join('');
+    $('days').hidden = false;
+
+    const nightD = D.nights.map(([a, b]) => 'M' + X(a) + ' 0 H' + X(b) + ' V100 H' + X(a) + ' Z').join(' ');
+    let gridD = '';
+    for (let g = 0; g <= 4; g++) gridD += 'M0 ' + g * 25 + ' H1000 ';
+    let dayD = '';
+    for (let d = 1; d < D.days.length; d++) dayD += 'M' + X(d * 24) + ' 0 V100 ';
+    const ns = 'vector-effect="non-scaling-stroke"';
+
+    $('panels').innerHTML = VARS.map((v, k) => {
+      const V = D.vars[v.key];
+      const members = V.members.map((m) => '<path class="member" ' + ns + ' d="' + linePath(m, V.scale) + '"/>').join('');
+      return '<section class="panel" aria-labelledby="h' + k + '">' +
+        '<div class="phead"><h2 id="h' + k + '">' + v.title + ' <small>' + v.unit + '</small></h2>' +
+        '<span class="readout mono"><span class="word">now</span> <span class="val v" data-k="p' + k + '"></span> · 10-day range ' + range(V.mean, v.fmt) + '</span></div>' +
+        '<div class="pbody"><div class="yax mono" aria-hidden="true" style="height:' + v.h + 'px">' + V.scale.labels.map((l) => '<span>' + l + '</span>').join('') + '</div>' +
+        '<div class="chart" tabindex="0" aria-label="' + v.title + ' chart. left and right arrows move the hour cursor, shift for a day, escape returns to now">' +
+        '<svg viewBox="0 0 1000 100" preserveAspectRatio="none" style="height:' + v.h + 'px" role="img" aria-label="' + v.title + ' for the next ' + D.days.length + ' days: ' + V.members.length + ' model runs and their average">' +
+        '<path class="night" d="' + nightD + '"/>' +
+        '<path class="gridl" ' + ns + ' d="' + gridD + '"/>' +
+        '<path class="gridl" ' + ns + ' d="' + dayD + '"/>' +
+        members +
+        '<path class="mean" ' + ns + ' d="' + linePath(V.mean, V.scale) + '"/>' +
+        '<path class="nowl" ' + ns + ' d=""/>' +
+        '</svg><div class="tag mono" aria-hidden="true"></div></div></div></section>';
+    }).join('');
+
+    document.querySelectorAll('.chart').forEach((el) => {
+      el.addEventListener('pointermove', onMove);
+      el.addEventListener('pointerleave', onLeave);
+      el.addEventListener('blur', onLeave);
+      el.addEventListener('keydown', onKey);
+    });
+  }
+
+  function range(arr, fmt) {
+    const xs = arr.filter((x) => x !== null);
+    return xs.length ? fmt(Math.min(...xs)) + '–' + fmt(Math.max(...xs)) : '–';
+  }
+
+  // values shown for "now" (header, readouts, day hi/lo) — also what gets compared between refreshes
+  function nowValues() {
+    const nh = nowHour();
+    const i = clamp(Math.round(nh), 0, D.H - 1);
+    const T = D.vars.temp.mean;
+    const day0 = clamp(Math.floor(nh / 24), 0, D.days.length - 1) * 24;
+    const today = T.slice(day0, day0 + 24).filter((x) => x !== null);
+    const at = (k, fmt) => { const x = D.vars[k].mean[i]; return x === null ? '–' : fmt(x); };
+    const vals = {
+      date: fmtDate(localNow()), time: fmtTime(localNow()),
+      temp: at('temp', (x) => Math.round(x) + '°'),
+      hi: today.length ? Math.round(Math.max(...today)) + '°' : '–',
+      lo: today.length ? Math.round(Math.min(...today)) + '°' : '–',
+      wind: at('wind', (x) => String(Math.round(x))),
+      cloud: at('cloud', (x) => Math.round(x) + '%'),
+      rain: at('rain', (x) => x.toFixed(2))
+    };
+    VARS.forEach((v, k) => { vals['p' + k] = at(v.key, v.fmt); });
+    D.days.forEach((d, k) => {
+      const s = T.slice(k * 24, k * 24 + 24).filter((x) => x !== null);
+      vals['d' + k] = s.length ? Math.round(Math.max(...s)) + '/' + Math.round(Math.min(...s)) : '';
+    });
+    return vals;
+  }
+
+  const cursorActive = () => hover !== null || glide !== null;
+
+  // draws everything that moves: clock, header values, now/hover line, readouts
+  function update(pulse) {
+    if (!D) return;
+    const vals = nowValues();
+    const ids = { date: 'date', time: 'time', temp: 'nowTemp', hi: 'nowHi', lo: 'nowLo', wind: 'nowWind', cloud: 'nowCloud', rain: 'nowRain' };
+    for (const k in ids) $(ids[k]).textContent = vals[k];
+    D.days.forEach((d, k) => {
+      const el = document.querySelector('[data-k="d' + k + '"]');
+      if (!el) return;
+      const [hi, lo] = vals['d' + k].split('/');
+      el.innerHTML = lo === undefined ? '' : '<span class="lg">' + hi + '/' + lo + '</span><span class="sm">' + hi + '<br>' + lo + '</span>';
+    });
+
+    const nh = nowHour();
+    const x = glide !== null ? glide : (hover !== null ? hover : clamp(nh, 0, D.H - 1));
+    const idx = hover !== null ? hover : (glide !== null ? clamp(Math.round(glide), 0, D.H - 1) : null);
+    const label = idx === null ? 'now · ' + vals.time : fmtHour(D.t0 + idx * 3.6e6);
+    const pct = x / D.H * 100;
+    const shift = pct < 5 ? '0' : (pct > 95 ? '-100%' : '-50%');
+    const lineD = 'M' + X(x) + ' 0 V100';
+
+    document.querySelectorAll('.panel').forEach((p, k) => {
+      p.querySelector('.nowl').setAttribute('d', lineD);
+      const tag = p.querySelector('.tag');
+      tag.textContent = label;
+      tag.style.left = pct + '%';
+      tag.style.transform = 'translateX(' + shift + ')';
+      p.querySelector('.word').textContent = idx === null ? 'now' : label;
+      const m = D.vars[VARS[k].key].mean[idx === null ? clamp(Math.round(nh), 0, D.H - 1) : idx];
+      p.querySelector('.val').textContent = m === null ? '–' : VARS[k].fmt(m);
+    });
+
+    if (pulse && prevVals) {
+      for (const k in vals) {
+        if (vals[k] === prevVals[k]) continue;
+        if (k[0] === 'p' && cursorActive()) continue; // readout is showing the cursor's hour, not now
+        const el = document.querySelector('[data-k="' + k + '"]');
+        if (el) { el.classList.remove('pulse'); void el.offsetWidth; el.classList.add('pulse'); }
+      }
+    }
+    if (pulse || !prevVals) prevVals = vals;
+  }
+
+  // ---- hour cursor ----
+  function stopGlide() {
+    if (leaveT) { clearTimeout(leaveT); leaveT = null; }
+    if (raf) { cancelAnimationFrame(raf); raf = null; }
+  }
+  function onMove(e) {
+    stopGlide();
+    glide = null;
+    const r = e.currentTarget.getBoundingClientRect();
+    if (!r.width) return;
+    const i = clamp(Math.round((e.clientX - r.left) / r.width * D.H), 0, D.H - 1);
+    if (i !== hover) { hover = i; update(false); }
+  }
+  function onLeave() {
+    stopGlide();
+    if (hover === null && glide === null) return;
+    const from = glide !== null ? glide : hover;
+    leaveT = setTimeout(() => {
+      leaveT = null;
+      const to = clamp(nowHour(), 0, D.H - 1);
+      const dur = 350 + 450 * Math.abs(to - from) / D.H;
+      const t0 = performance.now();
+      hover = null;
+      const step = (t) => {
+        const p = Math.min(1, (t - t0) / dur);
+        if (p < 1) {
+          glide = from + (to - from) * (1 - Math.pow(1 - p, 3));
+          raf = requestAnimationFrame(step);
+        } else {
+          raf = null; glide = null;
+        }
+        update(false);
+      };
+      raf = requestAnimationFrame(step);
+    }, 900);
+  }
+  function onKey(e) {
+    const start = hover !== null ? hover : clamp(Math.round(nowHour()), 0, D.H - 1);
+    const step = e.shiftKey ? 24 : 1;
+    if (e.key === 'ArrowRight') hover = Math.min(D.H - 1, start + step);
+    else if (e.key === 'ArrowLeft') hover = Math.max(0, start - step);
+    else if (e.key === 'Escape') hover = null;
+    else return;
+    e.preventDefault();
+    stopGlide();
+    glide = null;
+    update(false);
+  }
+
+  // ---- model menu ----
+  const menu = $('menu'), btn = $('modelBtn');
+  function drawMenu() {
+    const cur = MODELS.find((m) => m.key === modelKey);
+    $('modelLabel').textContent = cur.label + ' ensemble';
+    menu.innerHTML = MODELS.map((m) =>
+      '<button type="button" role="menuitemradio" data-model="' + m.key + '" aria-checked="' + (m.key === modelKey) + '"><span>' + m.label + '</span><span>' + m.runs + ' runs</span></button>').join('');
+  }
+  function setMenu(open) {
+    menu.hidden = !open;
+    btn.setAttribute('aria-expanded', String(open));
+    if (open) { const sel = menu.querySelector('[aria-checked="true"]'); if (sel) sel.focus(); }
+  }
+  btn.addEventListener('click', (e) => { e.stopPropagation(); setMenu(menu.hidden); });
+  menu.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-model]');
+    if (!b) return;
+    setMenu(false);
+    btn.focus();
+    if (b.dataset.model === modelKey) return;
+    modelKey = b.dataset.model;
+    const u = new URL(location.href);
+    u.searchParams.set('model', modelKey);
+    history.replaceState(null, '', u);
+    drawMenu();
+    refresh(false);
+  });
+  document.addEventListener('click', (e) => { if (!menu.hidden && !e.target.closest('.menu-wrap')) setMenu(false); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !menu.hidden) { setMenu(false); btn.focus(); } });
+
+  // ---- refresh loop ----
+  async function refresh(pulse) {
+    if (loading) return;
+    loading = true;
+    const model = MODELS.find((m) => m.key === modelKey);
+    const keepCursor = !!D;
+    try {
+      const next = await fetchForecast(model);
+      if (model.key !== modelKey) return; // switched again while loading
+      D = next;
+      lastFetch = Date.now();
+      if (!keepCursor) { hover = null; glide = null; }
+      build();
+      if (hover !== null) hover = clamp(hover, 0, D.H - 1);
+      update(pulse);
+      $('fetched').textContent = 'updated ' + fmtTime(localNow());
+    } catch (err) {
+      if (D) {
+        $('fetched').innerHTML = '<span class="err">couldn’t update (' + String(err.message || err).replace(/[<>&]/g, '') + ') — showing ' + fmtTime(lastFetch + D.offset * 1000) + ' data</span>';
+      } else {
+        $('msg').textContent = 'couldn’t load the forecast: ' + (err.message || err) + '. retrying in a minute.';
+      }
+    } finally {
+      loading = false;
+    }
+  }
+
+  function tick() {
+    if (!D) { refresh(false); return; }
+    const stale = Date.now() - lastFetch >= FETCH_MS;
+    const newDay = nowHour() >= 24; // past midnight: re-anchor the chart on today
+    if (stale || newDay) refresh(true);
+    else update(true);
+  }
+
+  drawMenu();
+  refresh(false);
+  // tick on the minute so the clock turns over when it should
+  setTimeout(() => { tick(); setInterval(tick, CLOCK_MS); }, CLOCK_MS - (Date.now() % CLOCK_MS) + 50);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && D) tick(); });
+})();
+</script>
+</body>
+</html>
