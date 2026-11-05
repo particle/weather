@@ -102,13 +102,29 @@ footer a:hover { color: var(--ink); }
 .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; width: 100%; }
 .legend span { display: flex; align-items: center; gap: 6px; }
 .err { color: var(--ink); }
+
+/* location: the heading is the editor */
+.place-wrap { position: relative; }
+.place-btn { font: inherit; color: inherit; background: none; border: 0; padding: 4px 0; margin: -4px 0; cursor: text; text-align: left;
+  text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 6px; text-decoration-thickness: 1px; }
+.place-btn:hover, .place-btn:focus-visible { text-decoration-color: var(--grid); }
+.place-input { font: inherit; color: inherit; background: transparent; border: 0; border-bottom: 1px solid var(--muted); border-radius: 0;
+  padding: 0; margin: 0; width: min(420px, 80vw); outline: none; }
+.place-input::placeholder { color: var(--muted); }
+.places { left: 0; top: calc(100% + 10px); width: min(360px, 90vw); }
+.places button { font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 14px; }
+.places button[aria-selected="true"] { background: var(--night); }
+.places .hint { padding: 10px 12px; font-size: 13px; color: var(--muted); }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <div>
-      <h1 id="place">seattle, wa</h1>
+      <div class="place-wrap">
+        <h1><button type="button" class="place-btn" id="placeBtn" title="change location">seattle, wa</button><input class="place-input" id="placeInput" type="text" placeholder="search for a place" autocomplete="off" spellcheck="false" role="combobox" aria-label="search for a place" aria-autocomplete="list" aria-expanded="false" aria-controls="places" hidden></h1>
+        <div class="menu places" id="places" role="listbox" aria-label="places" hidden></div>
+      </div>
       <div class="status">
         <span class="v" data-k="date" id="date">&nbsp;</span> ·
         <span class="v" data-k="time" id="time">&nbsp;</span> ·
@@ -155,11 +171,17 @@ footer a:hover { color: var(--ink); }
   // ---- settings (override with ?lat=&lon=&name=&model=&theme=) ----
   const qs = new URLSearchParams(location.search);
   const num = (k) => { const v = parseFloat(qs.get(k)); return Number.isFinite(v) ? v : null; };
-  const LOC = {
-    lat: num('lat') ?? 47.6062,
-    lon: num('lon') ?? -122.3321,
-    name: qs.get('name') || (qs.has('lat') ? 'custom location' : 'seattle, wa')
+  const LOC_KEY = 'weather-lines.location';
+  const store = {
+    get() { try { return JSON.parse(localStorage.getItem(LOC_KEY) || 'null'); } catch (e) { return null; } },
+    set(v) { try { localStorage.setItem(LOC_KEY, JSON.stringify(v)); } catch (e) { /* private mode */ } }
   };
+  const saved = store.get();
+  const LOC = (num('lat') !== null && num('lon') !== null)
+    ? { lat: num('lat'), lon: num('lon'), name: qs.get('name') || 'custom location' }
+    : (saved && Number.isFinite(saved.lat) && Number.isFinite(saved.lon) && saved.name)
+      ? { lat: saved.lat, lon: saved.lon, name: saved.name }
+      : { lat: 47.6062, lon: -122.3321, name: 'seattle, wa' };
   const theme = qs.get('theme');
   if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
 
@@ -305,7 +327,7 @@ footer a:hover { color: var(--ink); }
   }
 
   function build() {
-    $('place').textContent = LOC.name;
+    $('placeBtn').textContent = LOC.name;
     document.title = LOC.name + ' · weather lines';
 
     const grid = $('daysGrid');
@@ -504,14 +526,17 @@ footer a:hover { color: var(--ink); }
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !menu.hidden) { setMenu(false); btn.focus(); } });
 
   // ---- refresh loop ----
+  let pending = null;
+  const locKey = () => LOC.lat.toFixed(4) + ',' + LOC.lon.toFixed(4);
   async function refresh(pulse) {
-    if (loading) return;
+    if (loading) { pending = pending || pulse; return; }
     loading = true;
     const model = MODELS.find((m) => m.key === modelKey);
+    const where = locKey();
     const keepCursor = !!D;
     try {
       const next = await fetchForecast(model);
-      if (model.key !== modelKey) return; // switched again while loading
+      if (model.key !== modelKey || where !== locKey()) return; // changed again while loading
       D = next;
       lastFetch = Date.now();
       if (!keepCursor) { hover = null; glide = null; }
@@ -527,6 +552,7 @@ footer a:hover { color: var(--ink); }
       }
     } finally {
       loading = false;
+      if (pending !== null) { const p = pending; pending = null; refresh(p); }
     }
   }
 
@@ -537,6 +563,122 @@ footer a:hover { color: var(--ink); }
     if (stale || newDay) refresh(true);
     else update(true);
   }
+
+  // ---- location editor: click the place name, type, pick ----
+  const placeBtn = $('placeBtn'), placeInput = $('placeInput'), places = $('places');
+  let results = [], sel = -1, searchT = null, searchSeq = 0, editing = false;
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const US = { alabama: 'al', alaska: 'ak', arizona: 'az', arkansas: 'ar', california: 'ca', colorado: 'co', connecticut: 'ct', delaware: 'de',
+    'district of columbia': 'dc', florida: 'fl', georgia: 'ga', hawaii: 'hi', idaho: 'id', illinois: 'il', indiana: 'in', iowa: 'ia', kansas: 'ks',
+    kentucky: 'ky', louisiana: 'la', maine: 'me', maryland: 'md', massachusetts: 'ma', michigan: 'mi', minnesota: 'mn', mississippi: 'ms',
+    missouri: 'mo', montana: 'mt', nebraska: 'ne', nevada: 'nv', 'new hampshire': 'nh', 'new jersey': 'nj', 'new mexico': 'nm', 'new york': 'ny',
+    'north carolina': 'nc', 'north dakota': 'nd', ohio: 'oh', oklahoma: 'ok', oregon: 'or', pennsylvania: 'pa', 'rhode island': 'ri',
+    'south carolina': 'sc', 'south dakota': 'sd', tennessee: 'tn', texas: 'tx', utah: 'ut', vermont: 'vt', virginia: 'va', washington: 'wa',
+    'west virginia': 'wv', wisconsin: 'wi', wyoming: 'wy' };
+  // "seattle, wa" in the us, "galway, ireland" elsewhere
+  const shortName = (r) => {
+    const name = (r.name || '').toLowerCase();
+    const a1 = (r.admin1 || '').toLowerCase();
+    if (r.country_code === 'US' && US[a1]) return name + ', ' + US[a1];
+    return name + (r.country ? ', ' + r.country.toLowerCase() : '');
+  };
+  const longName = (r) => [r.name, r.admin1, r.country].filter(Boolean).join(', ').toLowerCase();
+
+  function openEditor() {
+    editing = true;
+    placeBtn.hidden = true;
+    placeInput.hidden = false;
+    placeInput.value = LOC.name;
+    placeInput.focus();
+    placeInput.select();
+    results = []; sel = -1;
+    drawPlaces('type a city or town');
+  }
+  function closeEditor(refocus = true) {
+    if (!editing) return;
+    editing = false;
+    clearTimeout(searchT);
+    searchSeq++;
+    places.hidden = true;
+    placeInput.setAttribute('aria-expanded', 'false');
+    placeInput.hidden = true;
+    placeBtn.hidden = false;
+    if (refocus) placeBtn.focus();
+  }
+  function drawPlaces(hint) {
+    const items = results.map((r, i) =>
+      '<button type="button" role="option" id="pl' + i + '" data-i="' + i + '" aria-selected="' + (i === sel) + '"><span>' + esc(longName(r)) + '</span></button>');
+    items.push('<button type="button" role="option" id="plgeo" data-geo="1" aria-selected="' + (sel === results.length) + '"><span>use my current location</span></button>');
+    places.innerHTML = (hint ? '<div class="hint">' + esc(hint) + '</div>' : '') + items.join('');
+    places.hidden = false;
+    placeInput.setAttribute('aria-expanded', 'true');
+    const act = sel === results.length ? 'plgeo' : (sel >= 0 ? 'pl' + sel : '');
+    if (act) placeInput.setAttribute('aria-activedescendant', act); else placeInput.removeAttribute('aria-activedescendant');
+  }
+  async function search(q) {
+    const seq = ++searchSeq;
+    try {
+      const u = 'https://geocoding-api.open-meteo.com/v1/search?' + new URLSearchParams({ name: q, count: '6', language: 'en', format: 'json' });
+      const j = await getJSON(u);
+      if (seq !== searchSeq || !editing) return;
+      results = (j && j.results) || [];
+      sel = results.length ? 0 : -1;
+      drawPlaces(results.length ? '' : 'no places match “' + q + '”');
+    } catch (e) {
+      if (seq !== searchSeq || !editing) return;
+      results = []; sel = -1;
+      drawPlaces('couldn’t search right now');
+    }
+  }
+  function setLocation(lat, lon, name) {
+    LOC.lat = lat; LOC.lon = lon; LOC.name = name;
+    store.set({ lat, lon, name });
+    const u = new URL(location.href);
+    ['lat', 'lon', 'name'].forEach((k) => u.searchParams.delete(k));
+    history.replaceState(null, '', u);
+    placeBtn.textContent = name;
+    closeEditor();
+    // a new place isn't a change in the forecast: no pulses, no carried-over cursor
+    prevVals = null; hover = null; glide = null; stopGlide();
+    $('fetched').textContent = 'loading ' + name + '…';
+    refresh(false);
+  }
+  function choose(i) {
+    if (i === results.length) {
+      if (!navigator.geolocation) { drawPlaces('this browser can’t share its location'); return; }
+      drawPlaces('finding you…');
+      navigator.geolocation.getCurrentPosition(
+        (pos) => setLocation(+pos.coords.latitude.toFixed(4), +pos.coords.longitude.toFixed(4), 'my location'),
+        () => { if (editing) drawPlaces('location access was declined'); },
+        { timeout: 10000, maximumAge: 600000 });
+      return;
+    }
+    const r = results[i];
+    if (r) setLocation(r.latitude, r.longitude, shortName(r));
+  }
+
+  placeBtn.addEventListener('click', openEditor);
+  placeInput.addEventListener('input', () => {
+    clearTimeout(searchT);
+    const q = placeInput.value.trim();
+    if (q.length < 2) { results = []; sel = -1; drawPlaces('type a city or town'); return; }
+    searchT = setTimeout(() => search(q), 250);
+  });
+  placeInput.addEventListener('keydown', (e) => {
+    const n = results.length + 1; // + "use my current location"
+    if (e.key === 'ArrowDown') { e.preventDefault(); sel = (sel + 1) % n; drawPlaces(''); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = (sel - 1 + n) % n; drawPlaces(''); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (sel >= 0) choose(sel); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeEditor(); }
+  });
+  // mousedown so the pick lands before the input loses focus
+  places.addEventListener('mousedown', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    e.preventDefault();
+    choose(b.dataset.geo ? results.length : +b.dataset.i);
+  });
+  placeInput.addEventListener('blur', () => setTimeout(() => { if (editing && document.activeElement !== placeInput) closeEditor(false); }, 150));
 
   drawMenu();
   refresh(false);

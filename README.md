@@ -10,6 +10,7 @@ one static `index.html`, no build step, no api key. the browser pulls data strai
 - night shading from that day's sunrise and sunset
 - a dashed "now" line; hover or drag across a panel (or focus one and use ← →, shift for a day) to read any hour. it eases back to now when you leave
 - a day/date/hi-lo strip that stays pinned while you scroll
+- click the place name in the heading to change it: type a city, pick from the list (or use your current location). it remembers your choice on that device
 - model picker in the status line: noaa gfs (31 runs), ecmwf (51), google weathernext 2 (64)
 - follows the system light/dark setting
 
@@ -19,7 +20,7 @@ the clock and readouts update every minute and the forecast re-fetches every 30 
 
 | param | example | default |
 |---|---|---|
-| `lat`, `lon` | `?lat=53.35&lon=-6.26` | seattle |
+| `lat`, `lon` | `?lat=53.35&lon=-6.26` | last place you picked, else seattle |
 | `name` | `&name=dublin` | `seattle, wa` |
 | `model` | `gfs025`, `ecmwf_ifs025`, `google_weathernext2_ensemble` | `gfs025` |
 | `theme` | `light`, `dark` | follows the system |
@@ -32,4 +33,4 @@ the clock and readouts update every minute and the forecast re-fetches every 30 
 
 ## data and attribution
 
-forecast data comes from the open-meteo ensemble api (`ensemble-api.open-meteo.com/v1/ensemble`), and sunrise/sunset from their forecast api. open-meteo is free for non-commercial use, and its data is licensed cc by 4.0. the footer link covers the attribution.
+forecast data comes from the open-meteo ensemble api (`ensemble-api.open-meteo.com/v1/ensemble`), sunrise/sunset from their forecast api, and place search from their geocoding api. open-meteo is free for non-commercial use, and its data is licensed cc by 4.0. the footer link covers the attribution.
