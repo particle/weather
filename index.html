@@ -3,9 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="light dark" id="colorScheme">
 <title>weather lines</title>
 <meta name="description" content="a quiet, monochrome 10-day ensemble forecast">
+<script>
+  // set the theme before first paint so there's no flash
+  try {
+    var t = new URLSearchParams(location.search).get('theme') || localStorage.getItem('weather-lines.theme');
+    if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  } catch (e) { /* storage blocked */ }
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -25,9 +32,19 @@
   --bg: #0f0f0f; --ink: #f2f2f2; --ink-rgb: 242, 242, 242;
   --muted: #a3a3a3; --grid: #2a2a2a; --night: #181818;
 }
+/* asked for more contrast: heavier runs and gridlines, in either theme */
+@media (prefers-contrast: more) {
+  :root:not(#_) { --member-opacity: 0.45; --grid: rgba(var(--ink-rgb), 0.45); }
+}
+
 * { box-sizing: border-box; }
+/* keep focused things clear of the pinned days row */
+html { scroll-padding-top: 130px; }
 body { margin: 0; background: var(--bg); color: var(--ink); font-family: 'IBM Plex Sans', system-ui, sans-serif; }
 .mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+.sr-only { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
+:where(a, button, summary, input, [tabindex]):focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; border-radius: 4px; }
 .wrap { max-width: 1200px; margin: 0 auto; padding: 32px 16px 40px; display: flex; flex-direction: column; gap: 28px; }
 
 header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 24px; }
@@ -37,13 +54,13 @@ h1 { margin: 0; font-size: 28px; font-weight: 500; letter-spacing: -0.01em; }
 .big { font-size: 72px; line-height: 0.9; letter-spacing: -0.04em; }
 .side { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
 
-/* a changed value: quick tint up, slow fade out */
+/* a changed value: quick tint up, slow fade out. 12% at the peak keeps grey text above 4.5:1 */
 .v { border-radius: 4px; padding: 0 4px; margin: 0 -4px; }
 .big.v { border-radius: 8px; }
 .pulse { animation: tint 1.7s; }
 @keyframes tint {
   0%   { background-color: rgba(var(--ink-rgb), 0);   animation-timing-function: ease-out; }
-  10%  { background-color: rgba(var(--ink-rgb), 0.2); animation-timing-function: ease-in-out; }
+  10%  { background-color: rgba(var(--ink-rgb), 0.12); animation-timing-function: ease-in-out; }
   100% { background-color: rgba(var(--ink-rgb), 0); }
 }
 @media (prefers-reduced-motion: reduce) { .pulse { animation-duration: 0.01s; } }
@@ -51,13 +68,19 @@ h1 { margin: 0; font-size: 28px; font-weight: 500; letter-spacing: -0.01em; }
 .menu-wrap { position: relative; display: inline-block; }
 .model-btn { font: inherit; color: inherit; background: none; border: 0; padding: 12px 4px; margin: -12px -4px; cursor: pointer;
   text-decoration: underline; text-decoration-color: var(--grid); text-underline-offset: 4px; }
+.model-btn:hover { color: var(--ink); }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin: -8px 0 -8px -2px;
+  vertical-align: middle; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+.icon-btn:hover { color: var(--ink); background: var(--night); }
+.icon-btn svg { width: 18px; height: 18px; display: block; }
 .menu { position: absolute; left: -10px; top: calc(100% + 12px); z-index: 5; width: 240px; background: var(--bg);
   border: 1px solid var(--grid); border-radius: 10px; padding: 6px; display: flex; flex-direction: column; gap: 2px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); }
 .menu[hidden] { display: none; }
-.menu button { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; min-height: 44px;
+.menu button, .menu .opt { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; min-height: 44px;
   padding: 0 12px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); cursor: pointer; text-align: left;
   font: 400 13px/1.2 'IBM Plex Mono', ui-monospace, monospace; }
+.menu button:focus-visible { outline-offset: -2px; }
 .menu button[aria-checked="true"] { background: var(--night); font-weight: 500; }
 .menu button span + span { color: var(--muted); }
 
@@ -77,16 +100,20 @@ h1 { margin: 0; font-size: 28px; font-weight: 500; letter-spacing: -0.01em; }
   .day .hl { line-height: 1.25; }
 }
 
-.panel { display: flex; flex-direction: column; gap: 10px; }
+main { display: flex; flex-direction: column; gap: 40px; }
+#panels { display: flex; flex-direction: column; gap: 40px; }
+.panel { display: flex; flex-direction: column; gap: 12px; }
 .phead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; padding-left: 48px; }
 h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
 h2 small { font-size: 13px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--muted); }
 .readout { font-size: 13px; color: var(--muted); }
 .readout .val { color: var(--ink); font-size: 15px; }
+.nowrap { white-space: nowrap; }
 .pbody { display: flex; gap: 12px; }
 .yax { width: 36px; flex: none; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; font-size: 11px; color: var(--muted); }
 .yax span { height: 0; display: flex; align-items: center; }
-.chart { flex: 1; min-width: 0; position: relative; padding-bottom: 22px; cursor: crosshair; touch-action: pan-y; outline-offset: 4px; }
+.chart { flex: 1; min-width: 0; position: relative; padding-bottom: 22px; cursor: crosshair; touch-action: pan-y; }
+.chart:focus-visible { outline-offset: 6px; }
 .chart svg { display: block; width: 100%; overflow: visible; }
 .tag { position: absolute; bottom: 0; font-size: 11px; line-height: 18px; white-space: nowrap; padding: 0 6px; color: var(--bg); background: var(--ink); border-radius: 3px; pointer-events: none; }
 .night { fill: var(--night); }
@@ -95,10 +122,22 @@ h2 small { font-size: 13px; font-weight: 400; letter-spacing: 0; text-transform:
 .mean { fill: none; stroke: var(--ink); stroke-width: var(--mean-width); stroke-linejoin: round; stroke-linecap: round; }
 .nowl { fill: none; stroke: var(--ink); stroke-width: 1; stroke-dasharray: 3 3; }
 
+/* the same forecast as a table, for anyone who'd rather read than trace lines */
+.daily summary { width: max-content; padding: 6px 0; font-size: 13px; color: var(--muted); cursor: pointer; }
+.daily summary:hover { color: var(--ink); }
+.tbl-scroll { overflow-x: auto; margin-top: 12px; }
+.daily table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.daily th, .daily td { padding: 8px 16px 8px 0; text-align: left; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+.daily thead th { font-size: 12px; font-weight: 500; color: var(--muted); }
+.daily tbody th { font-weight: 500; }
+
 .msg { padding: 48px 0; font-size: 14px; color: var(--muted); text-align: center; }
 footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; padding-top: 16px; border-top: 1px solid var(--grid); font-size: 12px; color: var(--muted); }
 footer a { color: var(--muted); }
 footer a:hover { color: var(--ink); }
+.text-btn { font: inherit; color: inherit; background: none; border: 0; padding: 4px 2px; margin: -4px -2px; min-height: 24px;
+  text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.text-btn:hover { color: var(--ink); }
 .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; width: 100%; }
 .legend span { display: flex; align-items: center; gap: 6px; }
 .err { color: var(--ink); }
@@ -107,14 +146,24 @@ footer a:hover { color: var(--ink); }
 .place-wrap { position: relative; }
 .place-btn { font: inherit; color: inherit; background: none; border: 0; padding: 4px 0; margin: -4px 0; cursor: text; text-align: left;
   text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 6px; text-decoration-thickness: 1px; }
-.place-btn:hover, .place-btn:focus-visible { text-decoration-color: var(--grid); }
+.place-btn:hover, .place-btn:focus-visible { text-decoration-color: var(--muted); }
 .place-input { font: inherit; color: inherit; background: transparent; border: 0; border-bottom: 1px solid var(--muted); border-radius: 0;
-  padding: 0; margin: 0; width: min(420px, 80vw); outline: none; }
+  padding: 0; margin: 0; width: min(420px, 80vw); }
 .place-input::placeholder { color: var(--muted); }
 .places { left: 0; top: calc(100% + 10px); width: min(360px, 90vw); }
-.places button { font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 14px; }
-.places button[aria-selected="true"] { background: var(--night); }
+.places .opt { font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 14px; }
+.places .opt[aria-selected="true"] { background: var(--night); outline: 1px solid var(--muted); outline-offset: -1px; }
 .places .hint { padding: 10px 12px; font-size: 13px; color: var(--muted); }
+.places .hint:empty { display: none; }
+
+/* windows high contrast and similar: let the system colors through */
+@media (forced-colors: active) {
+  .member, .gridl { stroke: GrayText; }
+  .mean, .nowl { stroke: CanvasText; }
+  .night { fill: transparent; }
+  .tag { forced-color-adjust: none; background: CanvasText; color: Canvas; }
+  .pulse { animation: none; }
+}
 </style>
 </head>
 <body>
@@ -123,21 +172,24 @@ footer a:hover { color: var(--ink); }
     <div>
       <div class="place-wrap">
         <h1><button type="button" class="place-btn" id="placeBtn" title="change location">seattle, wa</button><input class="place-input" id="placeInput" type="text" placeholder="search for a place" autocomplete="off" spellcheck="false" role="combobox" aria-label="search for a place" aria-autocomplete="list" aria-expanded="false" aria-controls="places" hidden></h1>
-        <div class="menu places" id="places" role="listbox" aria-label="places" hidden></div>
+        <div class="menu places" id="placesPop" hidden>
+          <div class="hint" id="placesHint" aria-hidden="true"></div>
+          <div id="places" role="listbox" aria-label="places"></div>
+        </div>
+        <div class="sr-only" id="placesStatus" role="status"></div>
       </div>
       <div class="status">
-        <span class="v" data-k="date" id="date">&nbsp;</span> ·
-        <span class="v" data-k="time" id="time">&nbsp;</span> ·
-        <span class="menu-wrap">
-          <button type="button" class="model-btn" id="modelBtn" aria-haspopup="true" aria-expanded="false" aria-controls="menu"><span id="modelLabel">noaa gfs ensemble</span> ▾</button>
+        <span class="v" data-k="date" id="date">&nbsp;</span><span aria-hidden="true"> · </span><span class="v" data-k="time" id="time">&nbsp;</span><span aria-hidden="true"> · </span><span class="menu-wrap">
+          <button type="button" class="model-btn" id="modelBtn" aria-haspopup="menu" aria-expanded="false"><span id="modelLabel">noaa gfs ensemble</span><span aria-hidden="true"> ▾</span></button>
           <div class="menu" id="menu" role="menu" aria-label="forecast model" hidden></div>
-        </span>
+        </span><span aria-hidden="true"> · </span><button type="button" class="icon-btn" id="themeBtn"></button>
       </div>
     </div>
     <div class="current mono">
+      <span class="sr-only">current temperature</span>
       <div class="big v" data-k="temp" id="nowTemp">–</div>
       <div class="side">
-        <span>hi <span class="v" data-k="hi" id="nowHi">–</span> · lo <span class="v" data-k="lo" id="nowLo">–</span></span>
+        <span>hi <span class="v" data-k="hi" id="nowHi">–</span><span aria-hidden="true"> · </span><span class="sr-only">, </span>lo <span class="v" data-k="lo" id="nowLo">–</span></span>
         <span>wind <span class="v" data-k="wind" id="nowWind">–</span> mph</span>
         <span>clouds <span class="v" data-k="cloud" id="nowCloud">–</span></span>
         <span>rain <span class="v" data-k="rain" id="nowRain">–</span> in/hr</span>
@@ -145,12 +197,37 @@ footer a:hover { color: var(--ink); }
     </div>
   </header>
 
-  <div class="days" id="days" hidden>
+  <!-- visual only: the same days, highs and lows are in the table below -->
+  <div class="days" id="days" aria-hidden="true" hidden>
     <div class="spacer"></div>
     <div class="days-grid" id="daysGrid"></div>
   </div>
 
-  <main id="panels"><div class="msg" id="msg">loading forecast…</div></main>
+  <main>
+    <div class="sr-only" id="announce" role="status"></div>
+    <div id="panels"><div class="msg" id="msg" role="status">loading forecast…</div></div>
+    <details class="daily" id="daily" hidden>
+      <summary>show the forecast as a table</summary>
+      <div class="tbl-scroll" role="region" aria-labelledby="dailyCap" tabindex="0">
+        <table>
+          <caption class="sr-only" id="dailyCap">daily forecast</caption>
+          <thead>
+            <tr>
+              <th scope="col">day</th>
+              <th scope="col">high</th>
+              <th scope="col">low</th>
+              <th scope="col">high across runs</th>
+              <th scope="col">rain (in)</th>
+              <th scope="col">max wind (mph)</th>
+              <th scope="col">cloud cover</th>
+              <th scope="col">daylight</th>
+            </tr>
+          </thead>
+          <tbody id="dailyBody"></tbody>
+        </table>
+      </div>
+    </details>
+  </main>
 
   <footer>
     <div class="legend" aria-hidden="true">
@@ -159,8 +236,8 @@ footer a:hover { color: var(--ink); }
       <span><svg width="12" height="10" viewBox="0 0 12 10"><rect width="12" height="10" fill="var(--night)" stroke="var(--grid)"/></svg>night</span>
       <span>dashed line = now</span>
     </div>
-    <span><a href="https://open-meteo.com/">weather data by open-meteo.com</a> (cc by 4.0) · <span id="fetched">not yet updated</span></span>
-    <span>hover or drag a panel, or focus one and use ← → (shift = a day), to read any hour</span>
+    <span><a href="https://open-meteo.com/">weather data by open-meteo.com</a> (cc by 4.0) · <span id="fetched">not yet updated</span> · <button type="button" class="text-btn" id="pauseBtn">pause updates</button></span>
+    <span>hover or drag a panel, or tab to one and use the arrow keys (shift or page up/down = a day, home/end = the ends, esc = now)</span>
   </footer>
 </div>
 
@@ -171,19 +248,17 @@ footer a:hover { color: var(--ink); }
   // ---- settings (override with ?lat=&lon=&name=&model=&theme=) ----
   const qs = new URLSearchParams(location.search);
   const num = (k) => { const v = parseFloat(qs.get(k)); return Number.isFinite(v) ? v : null; };
+  const saveGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const saveSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } };
   const LOC_KEY = 'weather-lines.location';
-  const store = {
-    get() { try { return JSON.parse(localStorage.getItem(LOC_KEY) || 'null'); } catch (e) { return null; } },
-    set(v) { try { localStorage.setItem(LOC_KEY, JSON.stringify(v)); } catch (e) { /* private mode */ } }
-  };
-  const saved = store.get();
+  const THEME_KEY = 'weather-lines.theme';
+  let saved = null;
+  try { saved = JSON.parse(saveGet(LOC_KEY) || 'null'); } catch (e) { saved = null; }
   const LOC = (num('lat') !== null && num('lon') !== null)
     ? { lat: num('lat'), lon: num('lon'), name: qs.get('name') || 'custom location' }
     : (saved && Number.isFinite(saved.lat) && Number.isFinite(saved.lon) && saved.name)
       ? { lat: saved.lat, lon: saved.lon, name: saved.name }
       : { lat: 47.6062, lon: -122.3321, name: 'seattle, wa' };
-  const theme = qs.get('theme');
-  if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
 
   const MODELS = [
     { key: 'gfs025', label: 'noaa gfs', runs: 31 },
@@ -192,11 +267,16 @@ footer a:hover { color: var(--ink); }
   ];
   let modelKey = MODELS.some((m) => m.key === qs.get('model')) ? qs.get('model') : MODELS[0].key;
 
+  // fmt: what's on screen. say/unit: what a screen reader hears in the hour cursor
   const VARS = [
-    { key: 'temp', api: 'temperature_2m', title: 'temperature', unit: '°f', h: 180, fmt: (v) => Math.round(v) + '°' },
-    { key: 'rain', api: 'precipitation', title: 'precipitation', unit: 'in / hr', h: 120, fmt: (v) => v.toFixed(2) },
-    { key: 'wind', api: 'wind_speed_10m', title: 'wind', unit: 'mph', h: 120, fmt: (v) => String(Math.round(v)) },
-    { key: 'cloud', api: 'cloud_cover', title: 'cloud cover', unit: '%', h: 120, fmt: (v) => Math.round(v) + '%' }
+    { key: 'temp', api: 'temperature_2m', title: 'temperature', unit: '°f', h: 180,
+      fmt: (v) => Math.round(v) + '°', say: (v) => Math.round(v) + '°', sayUnit: '' },
+    { key: 'rain', api: 'precipitation', title: 'precipitation', unit: 'in / hr', h: 120,
+      fmt: (v) => v.toFixed(2), say: (v) => v.toFixed(2), sayUnit: ' inches per hour' },
+    { key: 'wind', api: 'wind_speed_10m', title: 'wind', unit: 'mph', h: 120,
+      fmt: (v) => String(Math.round(v)), say: (v) => String(Math.round(v)), sayUnit: ' miles per hour' },
+    { key: 'cloud', api: 'cloud_cover', title: 'cloud cover', unit: '%', h: 120,
+      fmt: (v) => Math.round(v) + '%', say: (v) => Math.round(v) + '%', sayUnit: '' }
   ];
 
   const DAYS = 10;
@@ -204,9 +284,11 @@ footer a:hover { color: var(--ink); }
   const FETCH_MS = 30 * 60 * 1000;   // new forecast data
   const WD = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   const MO = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   const $ = (id) => document.getElementById(id);
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
   // ---- state ----
   let D = null;              // parsed forecast
@@ -216,14 +298,58 @@ footer a:hover { color: var(--ink); }
   let prevVals = null;       // last refresh's values, for change pulses
   let lastFetch = 0;
   let loading = false;
+  let paused = false;
+  let announceNext = false;  // say what loaded after a model or location change
+
+  // polite announcements for things that change without the user's focus moving
+  const announcer = $('announce');
+  function announce(text) {
+    announcer.textContent = '';
+    setTimeout(() => { announcer.textContent = text; }, 60);
+  }
 
   // ---- time helpers: "local" ms = wall-clock time at the forecast location, stored as if utc ----
   const parseLocal = (s) => Date.parse((s.length === 16 ? s + ':00' : s) + 'Z');
   const localNow = () => Date.now() + (D ? D.offset : 0) * 1000;
   const nowHour = () => (localNow() - D.t0) / 3.6e6;
+  const ampm = (d) => { const h = d.getUTCHours(); return (h % 12 || 12) + (d.getUTCMinutes() ? ':' + String(d.getUTCMinutes()).padStart(2, '0') : '') + ' ' + (h < 12 ? 'am' : 'pm'); };
   const fmtTime = (ms) => { const d = new Date(ms); const h = d.getUTCHours(); return (h % 12 || 12) + ':' + String(d.getUTCMinutes()).padStart(2, '0') + ' ' + (h < 12 ? 'am' : 'pm'); };
-  const fmtHour = (ms) => { const d = new Date(ms); const h = d.getUTCHours(); return WD[d.getUTCDay()].slice(0, 3) + ' ' + (h % 12 || 12) + ' ' + (h < 12 ? 'am' : 'pm'); };
+  const fmtHour = (ms) => { const d = new Date(ms); return WD[d.getUTCDay()].slice(0, 3) + ' ' + ampm(d); };
+  const fmtHourLong = (ms) => { const d = new Date(ms); return WD[d.getUTCDay()] + ' ' + ampm(d); };
   const fmtDate = (ms) => { const d = new Date(ms); return WD[d.getUTCDay()] + ', ' + MO[d.getUTCMonth()] + ' ' + d.getUTCDate(); };
+
+  // ---- theme: matches the device, light, or dark ----
+  const root = document.documentElement;
+  const THEMES = {
+    system: { next: 'light', name: 'matches your device',
+      icon: '<svg viewBox="0 0 18 18" aria-hidden="true" focusable="false"><circle cx="9" cy="9" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9 2.5a6.5 6.5 0 0 0 0 13z" fill="currentColor"/></svg>' },
+    light: { next: 'dark', name: 'light',
+      icon: '<svg viewBox="0 0 18 18" aria-hidden="true" focusable="false"><circle cx="9" cy="9" r="3.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9 1.5v2M9 14.5v2M1.5 9h2M14.5 9h2M3.7 3.7l1.4 1.4M12.9 12.9l1.4 1.4M3.7 14.3l1.4-1.4M12.9 5.1l1.4-1.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>' },
+    dark: { next: 'system', name: 'dark',
+      icon: '<svg viewBox="0 0 18 18" aria-hidden="true" focusable="false"><path d="M14.8 11.2A6.3 6.3 0 0 1 6.8 3.2a6.3 6.3 0 1 0 8 8z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>' }
+  };
+  const themeBtn = $('themeBtn');
+  let themeMode = (() => {
+    const t = qs.get('theme') || saveGet(THEME_KEY);
+    return t === 'light' || t === 'dark' ? t : 'system';
+  })();
+  function applyTheme() {
+    if (themeMode === 'system') delete root.dataset.theme; else root.dataset.theme = themeMode;
+    $('colorScheme').setAttribute('content', themeMode === 'system' ? 'light dark' : themeMode);
+    const t = THEMES[themeMode];
+    themeBtn.innerHTML = t.icon;
+    themeBtn.setAttribute('aria-label', 'theme: ' + t.name + '. switch to ' + THEMES[t.next].name);
+    themeBtn.title = 'theme: ' + t.name;
+  }
+  themeBtn.addEventListener('click', () => {
+    themeMode = THEMES[themeMode].next;
+    saveSet(THEME_KEY, themeMode);
+    const u = new URL(location.href);
+    u.searchParams.delete('theme');
+    history.replaceState(null, '', u);
+    applyTheme();
+    announce('theme: ' + THEMES[themeMode].name);
+  });
 
   // ---- data ----
   async function getJSON(url) {
@@ -294,16 +420,23 @@ footer a:hover { color: var(--ink); }
       vars[v.key] = { members, mean, scale: scaleFor(v.key, members.length ? members : [mean]) };
     }
     const nights = [];
+    let rises = [], sets = [];
     if (sun && sun.daily && sun.daily.sunrise) {
-      const rise = sun.daily.sunrise.map((s) => (parseLocal(s) - t0) / 3.6e6);
-      const set = sun.daily.sunset.map((s) => (parseLocal(s) - t0) / 3.6e6);
+      rises = sun.daily.sunrise.map(parseLocal);
+      sets = sun.daily.sunset.map(parseLocal);
+      const rise = rises.map((ms) => (ms - t0) / 3.6e6);
+      const set = sets.map((ms) => (ms - t0) / 3.6e6);
       nights.push([0, rise[0]]);
       for (let d = 0; d < set.length; d++) nights.push([set[d], d + 1 < rise.length ? rise[d + 1] : H]);
     }
     const days = [];
     for (let d = 0; d < Math.ceil(H / 24); d++) {
       const dt = new Date(t0 + d * 864e5);
-      days.push({ name: WD[dt.getUTCDay()].slice(0, 3), date: MO[dt.getUTCMonth()].slice(0, 3) + ' ' + dt.getUTCDate() });
+      days.push({
+        name: WD[dt.getUTCDay()].slice(0, 3), full: WD[dt.getUTCDay()],
+        date: MO[dt.getUTCMonth()].slice(0, 3) + ' ' + dt.getUTCDate(),
+        rise: rises[d], set: sets[d]
+      });
     }
     return {
       model, H, t0, offset: ens.utc_offset_seconds || 0, vars,
@@ -325,6 +458,7 @@ footer a:hover { color: var(--ink); }
     }
     return d.trim();
   }
+  const finite = (xs) => xs.filter((x) => x !== null && Number.isFinite(x));
 
   function build() {
     $('placeBtn').textContent = LOC.name;
@@ -345,22 +479,30 @@ footer a:hover { color: var(--ink); }
     for (let d = 1; d < D.days.length; d++) dayD += 'M' + X(d * 24) + ' 0 V100 ';
     const ns = 'vector-effect="non-scaling-stroke"';
 
+    // each chart is a slider over the hours: arrow keys move it, and a screen reader hears
+    // the hour, the average, and how far apart the runs are
     $('panels').innerHTML = VARS.map((v, k) => {
       const V = D.vars[v.key];
       const members = V.members.map((m) => '<path class="member" ' + ns + ' d="' + linePath(m, V.scale) + '"/>').join('');
+      const xs = finite(V.mean);
+      const summary = 'average of ' + V.members.length + ' model runs. over the next ' + D.days.length + ' days the average goes from ' +
+        (xs.length ? v.say(Math.min(...xs)) + ' to ' + v.say(Math.max(...xs)) + v.sayUnit : 'unknown') +
+        '. use the arrow keys to read each hour.';
       return '<section class="panel" aria-labelledby="h' + k + '">' +
         '<div class="phead"><h2 id="h' + k + '">' + v.title + ' <small>' + v.unit + '</small></h2>' +
-        '<span class="readout mono"><span class="word">now</span> <span class="val v" data-k="p' + k + '"></span> · 10-day range ' + range(V.mean, v.fmt) + '</span></div>' +
+        '<span class="readout mono"><span class="word">now</span> <span class="val v" data-k="p' + k + '"></span> · <span class="nowrap">10-day range ' + range(V.mean, v.fmt) + '</span></span></div>' +
         '<div class="pbody"><div class="yax mono" aria-hidden="true" style="height:' + v.h + 'px">' + V.scale.labels.map((l) => '<span>' + l + '</span>').join('') + '</div>' +
-        '<div class="chart" tabindex="0" aria-label="' + v.title + ' chart. left and right arrows move the hour cursor, shift for a day, escape returns to now">' +
-        '<svg viewBox="0 0 1000 100" preserveAspectRatio="none" style="height:' + v.h + 'px" role="img" aria-label="' + v.title + ' for the next ' + D.days.length + ' days: ' + V.members.length + ' model runs and their average">' +
+        '<div class="chart" tabindex="0" role="slider" aria-orientation="horizontal" aria-label="' + v.title + ' by hour" aria-describedby="s' + k + '"' +
+        ' aria-valuemin="0" aria-valuemax="' + (D.H - 1) + '" aria-valuenow="0">' +
+        '<svg viewBox="0 0 1000 100" preserveAspectRatio="none" style="height:' + v.h + 'px" aria-hidden="true" focusable="false">' +
         '<path class="night" d="' + nightD + '"/>' +
         '<path class="gridl" ' + ns + ' d="' + gridD + '"/>' +
         '<path class="gridl" ' + ns + ' d="' + dayD + '"/>' +
         members +
         '<path class="mean" ' + ns + ' d="' + linePath(V.mean, V.scale) + '"/>' +
         '<path class="nowl" ' + ns + ' d=""/>' +
-        '</svg><div class="tag mono" aria-hidden="true"></div></div></div></section>';
+        '</svg><div class="tag mono" aria-hidden="true"></div></div></div>' +
+        '<p class="sr-only" id="s' + k + '">' + esc(summary) + '</p></section>';
     }).join('');
 
     document.querySelectorAll('.chart').forEach((el) => {
@@ -369,10 +511,37 @@ footer a:hover { color: var(--ink); }
       el.addEventListener('blur', onLeave);
       el.addEventListener('keydown', onKey);
     });
+
+    buildTable();
+  }
+
+  function buildTable() {
+    const T = D.vars.temp, R = D.vars.rain, W = D.vars.wind, C = D.vars.cloud;
+    const day = (arr, k) => finite(arr.slice(k * 24, k * 24 + 24));
+    $('dailyCap').textContent = 'daily forecast for ' + LOC.name + ', ' + D.model.label + ' ensemble (' + D.runs + ' runs). values are the average of the runs.';
+    $('dailyBody').innerHTML = D.days.map((d, k) => {
+      const t = day(T.mean, k);
+      if (!t.length) return '';
+      const runHighs = finite(T.members.map((m) => { const s = day(m, k); return s.length ? Math.max(...s) : null; }));
+      const rain = day(R.mean, k).reduce((a, b) => a + b, 0);
+      const wind = day(W.mean, k);
+      const cloud = day(C.mean, k);
+      const cells = [
+        Math.round(Math.max(...t)) + '°',
+        Math.round(Math.min(...t)) + '°',
+        runHighs.length ? Math.round(Math.min(...runHighs)) + '° to ' + Math.round(Math.max(...runHighs)) + '°' : '–',
+        rain.toFixed(2),
+        wind.length ? String(Math.round(Math.max(...wind))) : '–',
+        cloud.length ? Math.round(cloud.reduce((a, b) => a + b, 0) / cloud.length) + '%' : '–',
+        Number.isFinite(d.rise) && Number.isFinite(d.set) ? ampm(new Date(d.rise)) + ' to ' + ampm(new Date(d.set)) : '–'
+      ];
+      return '<tr><th scope="row">' + d.full + ', ' + d.date + '</th>' + cells.map((c) => '<td class="mono">' + c + '</td>').join('') + '</tr>';
+    }).join('');
+    $('daily').hidden = false;
   }
 
   function range(arr, fmt) {
-    const xs = arr.filter((x) => x !== null);
+    const xs = finite(arr);
     return xs.length ? fmt(Math.min(...xs)) + '–' + fmt(Math.max(...xs)) : '–';
   }
 
@@ -382,7 +551,7 @@ footer a:hover { color: var(--ink); }
     const i = clamp(Math.round(nh), 0, D.H - 1);
     const T = D.vars.temp.mean;
     const day0 = clamp(Math.floor(nh / 24), 0, D.days.length - 1) * 24;
-    const today = T.slice(day0, day0 + 24).filter((x) => x !== null);
+    const today = finite(T.slice(day0, day0 + 24));
     const at = (k, fmt) => { const x = D.vars[k].mean[i]; return x === null ? '–' : fmt(x); };
     const vals = {
       date: fmtDate(localNow()), time: fmtTime(localNow()),
@@ -395,7 +564,7 @@ footer a:hover { color: var(--ink); }
     };
     VARS.forEach((v, k) => { vals['p' + k] = at(v.key, v.fmt); });
     D.days.forEach((d, k) => {
-      const s = T.slice(k * 24, k * 24 + 24).filter((x) => x !== null);
+      const s = finite(T.slice(k * 24, k * 24 + 24));
       vals['d' + k] = s.length ? Math.round(Math.max(...s)) + '/' + Math.round(Math.min(...s)) : '';
     });
     return vals;
@@ -417,22 +586,33 @@ footer a:hover { color: var(--ink); }
     });
 
     const nh = nowHour();
+    const nowI = clamp(Math.round(nh), 0, D.H - 1);
     const x = glide !== null ? glide : (hover !== null ? hover : clamp(nh, 0, D.H - 1));
     const idx = hover !== null ? hover : (glide !== null ? clamp(Math.round(glide), 0, D.H - 1) : null);
+    const at = idx === null ? nowI : idx;
     const label = idx === null ? 'now · ' + vals.time : fmtHour(D.t0 + idx * 3.6e6);
+    const spoken = idx === null ? 'now, ' + vals.time : fmtHourLong(D.t0 + idx * 3.6e6);
     const pct = x / D.H * 100;
     const shift = pct < 5 ? '0' : (pct > 95 ? '-100%' : '-50%');
     const lineD = 'M' + X(x) + ' 0 V100';
 
     document.querySelectorAll('.panel').forEach((p, k) => {
+      const v = VARS[k], V = D.vars[v.key];
       p.querySelector('.nowl').setAttribute('d', lineD);
       const tag = p.querySelector('.tag');
       tag.textContent = label;
       tag.style.left = pct + '%';
       tag.style.transform = 'translateX(' + shift + ')';
       p.querySelector('.word').textContent = idx === null ? 'now' : label;
-      const m = D.vars[VARS[k].key].mean[idx === null ? clamp(Math.round(nh), 0, D.H - 1) : idx];
-      p.querySelector('.val').textContent = m === null ? '–' : VARS[k].fmt(m);
+      const m = V.mean[at];
+      p.querySelector('.val').textContent = m === null ? '–' : v.fmt(m);
+
+      const runs = finite(V.members.map((row) => row[at]));
+      let text = spoken + ': ' + (m === null ? 'no data' : v.say(m) + v.sayUnit);
+      if (runs.length > 1) text += ', runs ' + v.say(Math.min(...runs)) + ' to ' + v.say(Math.max(...runs)) + v.sayUnit;
+      const chart = p.querySelector('.chart');
+      chart.setAttribute('aria-valuenow', String(at));
+      chart.setAttribute('aria-valuetext', text);
     });
 
     if (pulse && prevVals) {
@@ -465,10 +645,11 @@ footer a:hover { color: var(--ink); }
     const from = glide !== null ? glide : hover;
     leaveT = setTimeout(() => {
       leaveT = null;
+      hover = null;
+      if (reduceMotion.matches) { glide = null; update(false); return; }
       const to = clamp(nowHour(), 0, D.H - 1);
       const dur = 350 + 450 * Math.abs(to - from) / D.H;
       const t0 = performance.now();
-      hover = null;
       const step = (t) => {
         const p = Math.min(1, (t - t0) / dur);
         if (p < 1) {
@@ -484,11 +665,17 @@ footer a:hover { color: var(--ink); }
   }
   function onKey(e) {
     const start = hover !== null ? hover : clamp(Math.round(nowHour()), 0, D.H - 1);
-    const step = e.shiftKey ? 24 : 1;
-    if (e.key === 'ArrowRight') hover = Math.min(D.H - 1, start + step);
-    else if (e.key === 'ArrowLeft') hover = Math.max(0, start - step);
-    else if (e.key === 'Escape') hover = null;
-    else return;
+    const day = 24;
+    switch (e.key) {
+      case 'ArrowRight': case 'ArrowUp': hover = Math.min(D.H - 1, start + (e.shiftKey ? day : 1)); break;
+      case 'ArrowLeft': case 'ArrowDown': hover = Math.max(0, start - (e.shiftKey ? day : 1)); break;
+      case 'PageUp': hover = Math.min(D.H - 1, start + day); break;
+      case 'PageDown': hover = Math.max(0, start - day); break;
+      case 'Home': hover = 0; break;
+      case 'End': hover = D.H - 1; break;
+      case 'Escape': hover = null; break;
+      default: return;
+    }
     e.preventDefault();
     stopGlide();
     glide = null;
@@ -497,18 +684,35 @@ footer a:hover { color: var(--ink); }
 
   // ---- model menu ----
   const menu = $('menu'), btn = $('modelBtn');
+  const menuItems = () => Array.from(menu.querySelectorAll('[role="menuitemradio"]'));
   function drawMenu() {
     const cur = MODELS.find((m) => m.key === modelKey);
     $('modelLabel').textContent = cur.label + ' ensemble';
     menu.innerHTML = MODELS.map((m) =>
-      '<button type="button" role="menuitemradio" data-model="' + m.key + '" aria-checked="' + (m.key === modelKey) + '"><span>' + m.label + '</span><span>' + m.runs + ' runs</span></button>').join('');
+      '<button type="button" role="menuitemradio" tabindex="-1" data-model="' + m.key + '" aria-checked="' + (m.key === modelKey) + '"><span>' + m.label + '</span><span>' + m.runs + ' runs</span></button>').join('');
   }
   function setMenu(open) {
     menu.hidden = !open;
     btn.setAttribute('aria-expanded', String(open));
+    // only point at the menu while it exists on screen
+    if (open) btn.setAttribute('aria-controls', 'menu'); else btn.removeAttribute('aria-controls');
     if (open) { const sel = menu.querySelector('[aria-checked="true"]'); if (sel) sel.focus(); }
   }
   btn.addEventListener('click', (e) => { e.stopPropagation(); setMenu(menu.hidden); });
+  btn.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setMenu(true); }
+  });
+  menu.addEventListener('keydown', (e) => {
+    const items = menuItems();
+    const i = items.indexOf(document.activeElement);
+    let to = null;
+    if (e.key === 'ArrowDown') to = (i + 1) % items.length;
+    else if (e.key === 'ArrowUp') to = (i - 1 + items.length) % items.length;
+    else if (e.key === 'Home') to = 0;
+    else if (e.key === 'End') to = items.length - 1;
+    else if (e.key === 'Tab') { setMenu(false); return; }
+    if (to !== null) { e.preventDefault(); items[to].focus(); }
+  });
   menu.addEventListener('click', (e) => {
     const b = e.target.closest('[data-model]');
     if (!b) return;
@@ -520,6 +724,7 @@ footer a:hover { color: var(--ink); }
     u.searchParams.set('model', modelKey);
     history.replaceState(null, '', u);
     drawMenu();
+    announceNext = true;
     refresh(false);
   });
   document.addEventListener('click', (e) => { if (!menu.hidden && !e.target.closest('.menu-wrap')) setMenu(false); });
@@ -537,18 +742,27 @@ footer a:hover { color: var(--ink); }
     try {
       const next = await fetchForecast(model);
       if (model.key !== modelKey || where !== locKey()) return; // changed again while loading
+      const focusedChart = Array.from(document.querySelectorAll('.chart')).indexOf(document.activeElement);
       D = next;
       lastFetch = Date.now();
       if (!keepCursor) { hover = null; glide = null; }
       build();
       if (hover !== null) hover = clamp(hover, 0, D.H - 1);
       update(pulse);
+      // a rebuild replaces the charts; put keyboard focus back where it was
+      if (focusedChart >= 0) document.querySelectorAll('.chart')[focusedChart].focus({ preventScroll: true });
       $('fetched').textContent = 'updated ' + fmtTime(localNow());
+      if (announceNext) {
+        announceNext = false;
+        announce('showing the ' + model.label + ' ensemble, ' + D.runs + ' runs, for ' + LOC.name);
+      }
     } catch (err) {
+      const why = String(err.message || err);
       if (D) {
-        $('fetched').innerHTML = '<span class="err">couldn’t update (' + String(err.message || err).replace(/[<>&]/g, '') + ') — showing ' + fmtTime(lastFetch + D.offset * 1000) + ' data</span>';
+        $('fetched').innerHTML = '<span class="err">couldn’t update (' + esc(why) + ') — showing ' + fmtTime(lastFetch + D.offset * 1000) + ' data</span>';
+        if (announceNext) { announceNext = false; announce('couldn’t load that forecast: ' + why); }
       } else {
-        $('msg').textContent = 'couldn’t load the forecast: ' + (err.message || err) + '. retrying in a minute.';
+        $('msg').textContent = 'couldn’t load the forecast: ' + why + '. retrying in a minute.';
       }
     } finally {
       loading = false;
@@ -557,6 +771,7 @@ footer a:hover { color: var(--ink); }
   }
 
   function tick() {
+    if (paused) return;
     if (!D) { refresh(false); return; }
     const stale = Date.now() - lastFetch >= FETCH_MS;
     const newDay = nowHour() >= 24; // past midnight: re-anchor the chart on today
@@ -564,10 +779,24 @@ footer a:hover { color: var(--ink); }
     else update(true);
   }
 
+  // auto-updating content can be paused (wcag 2.2.2)
+  const pauseBtn = $('pauseBtn');
+  pauseBtn.addEventListener('click', () => {
+    paused = !paused;
+    pauseBtn.textContent = paused ? 'resume updates' : 'pause updates';
+    if (paused) {
+      $('fetched').textContent = 'updates paused';
+      announce('updates paused');
+    } else {
+      announce('updates resumed');
+      $('fetched').textContent = D ? 'updated ' + fmtTime(lastFetch + D.offset * 1000) : 'not yet updated';
+      tick();
+    }
+  });
+
   // ---- location editor: click the place name, type, pick ----
-  const placeBtn = $('placeBtn'), placeInput = $('placeInput'), places = $('places');
+  const placeBtn = $('placeBtn'), placeInput = $('placeInput'), places = $('places'), placesPop = $('placesPop');
   let results = [], sel = -1, searchT = null, searchSeq = 0, editing = false;
-  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const US = { alabama: 'al', alaska: 'ak', arizona: 'az', arkansas: 'ar', california: 'ca', colorado: 'co', connecticut: 'ct', delaware: 'de',
     'district of columbia': 'dc', florida: 'fl', georgia: 'ga', hawaii: 'hi', idaho: 'id', illinois: 'il', indiana: 'in', iowa: 'ia', kansas: 'ks',
     kentucky: 'ky', louisiana: 'la', maine: 'me', maryland: 'md', massachusetts: 'ma', michigan: 'mi', minnesota: 'mn', mississippi: 'ms',
@@ -584,6 +813,24 @@ footer a:hover { color: var(--ink); }
   };
   const longName = (r) => [r.name, r.admin1, r.country].filter(Boolean).join(', ').toLowerCase();
 
+  // hint: shown in the popup. said: what a screen reader hears (null = same as hint, '' = nothing)
+  function setHint(hint, said) {
+    $('placesHint').textContent = hint;
+    const s = said === null || said === undefined ? hint : said;
+    const status = $('placesStatus');
+    status.textContent = '';
+    if (s) setTimeout(() => { status.textContent = s; }, 60);
+  }
+  function drawPlaces() {
+    const items = results.map((r, i) =>
+      '<div class="opt" role="option" id="pl' + i + '" data-i="' + i + '" aria-selected="' + (i === sel) + '">' + esc(longName(r)) + '</div>');
+    items.push('<div class="opt" role="option" id="plgeo" data-geo="1" aria-selected="' + (sel === results.length) + '">use my current location</div>');
+    places.innerHTML = items.join('');
+    placesPop.hidden = false;
+    placeInput.setAttribute('aria-expanded', 'true');
+    const act = sel === results.length ? 'plgeo' : (sel >= 0 ? 'pl' + sel : '');
+    if (act) placeInput.setAttribute('aria-activedescendant', act); else placeInput.removeAttribute('aria-activedescendant');
+  }
   function openEditor() {
     editing = true;
     placeBtn.hidden = true;
@@ -592,28 +839,20 @@ footer a:hover { color: var(--ink); }
     placeInput.focus();
     placeInput.select();
     results = []; sel = -1;
-    drawPlaces('type a city or town');
+    setHint('type a city or town', '');
+    drawPlaces();
   }
   function closeEditor(refocus = true) {
     if (!editing) return;
     editing = false;
     clearTimeout(searchT);
     searchSeq++;
-    places.hidden = true;
+    placesPop.hidden = true;
     placeInput.setAttribute('aria-expanded', 'false');
+    placeInput.removeAttribute('aria-activedescendant');
     placeInput.hidden = true;
     placeBtn.hidden = false;
     if (refocus) placeBtn.focus();
-  }
-  function drawPlaces(hint) {
-    const items = results.map((r, i) =>
-      '<button type="button" role="option" id="pl' + i + '" data-i="' + i + '" aria-selected="' + (i === sel) + '"><span>' + esc(longName(r)) + '</span></button>');
-    items.push('<button type="button" role="option" id="plgeo" data-geo="1" aria-selected="' + (sel === results.length) + '"><span>use my current location</span></button>');
-    places.innerHTML = (hint ? '<div class="hint">' + esc(hint) + '</div>' : '') + items.join('');
-    places.hidden = false;
-    placeInput.setAttribute('aria-expanded', 'true');
-    const act = sel === results.length ? 'plgeo' : (sel >= 0 ? 'pl' + sel : '');
-    if (act) placeInput.setAttribute('aria-activedescendant', act); else placeInput.removeAttribute('aria-activedescendant');
   }
   async function search(q) {
     const seq = ++searchSeq;
@@ -623,16 +862,19 @@ footer a:hover { color: var(--ink); }
       if (seq !== searchSeq || !editing) return;
       results = (j && j.results) || [];
       sel = results.length ? 0 : -1;
-      drawPlaces(results.length ? '' : 'no places match “' + q + '”');
+      if (results.length) setHint('', results.length + (results.length === 1 ? ' place' : ' places') + ' found. use up and down arrows to choose, enter to pick.');
+      else setHint('no places match “' + q + '”');
+      drawPlaces();
     } catch (e) {
       if (seq !== searchSeq || !editing) return;
       results = []; sel = -1;
-      drawPlaces('couldn’t search right now');
+      setHint('couldn’t search right now');
+      drawPlaces();
     }
   }
   function setLocation(lat, lon, name) {
     LOC.lat = lat; LOC.lon = lon; LOC.name = name;
-    store.set({ lat, lon, name });
+    saveSet(LOC_KEY, JSON.stringify({ lat, lon, name }));
     const u = new URL(location.href);
     ['lat', 'lon', 'name'].forEach((k) => u.searchParams.delete(k));
     history.replaceState(null, '', u);
@@ -641,15 +883,16 @@ footer a:hover { color: var(--ink); }
     // a new place isn't a change in the forecast: no pulses, no carried-over cursor
     prevVals = null; hover = null; glide = null; stopGlide();
     $('fetched').textContent = 'loading ' + name + '…';
+    announceNext = true;
     refresh(false);
   }
   function choose(i) {
     if (i === results.length) {
-      if (!navigator.geolocation) { drawPlaces('this browser can’t share its location'); return; }
-      drawPlaces('finding you…');
+      if (!navigator.geolocation) { setHint('this browser can’t share its location'); return; }
+      setHint('finding you…');
       navigator.geolocation.getCurrentPosition(
         (pos) => setLocation(+pos.coords.latitude.toFixed(4), +pos.coords.longitude.toFixed(4), 'my location'),
-        () => { if (editing) drawPlaces('location access was declined'); },
+        () => { if (editing) setHint('location access was declined'); },
         { timeout: 10000, maximumAge: 600000 });
       return;
     }
@@ -661,25 +904,25 @@ footer a:hover { color: var(--ink); }
   placeInput.addEventListener('input', () => {
     clearTimeout(searchT);
     const q = placeInput.value.trim();
-    if (q.length < 2) { results = []; sel = -1; drawPlaces('type a city or town'); return; }
+    if (q.length < 2) { results = []; sel = -1; setHint('type a city or town', ''); drawPlaces(); return; }
     searchT = setTimeout(() => search(q), 250);
   });
   placeInput.addEventListener('keydown', (e) => {
     const n = results.length + 1; // + "use my current location"
-    if (e.key === 'ArrowDown') { e.preventDefault(); sel = (sel + 1) % n; drawPlaces(''); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = (sel - 1 + n) % n; drawPlaces(''); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); sel = (sel + 1) % n; drawPlaces(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = (sel - 1 + n) % n; drawPlaces(); }
     else if (e.key === 'Enter') { e.preventDefault(); if (sel >= 0) choose(sel); }
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeEditor(); }
   });
   // mousedown so the pick lands before the input loses focus
-  places.addEventListener('mousedown', (e) => {
-    const b = e.target.closest('button');
-    if (!b) return;
+  placesPop.addEventListener('mousedown', (e) => {
+    const o = e.target.closest('.opt');
     e.preventDefault();
-    choose(b.dataset.geo ? results.length : +b.dataset.i);
+    if (o) choose(o.dataset.geo ? results.length : +o.dataset.i);
   });
   placeInput.addEventListener('blur', () => setTimeout(() => { if (editing && document.activeElement !== placeInput) closeEditor(false); }, 150));
 
+  applyTheme();
   drawMenu();
   refresh(false);
   // tick on the minute so the clock turns over when it should
