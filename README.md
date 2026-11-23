@@ -10,7 +10,9 @@ one static `index.html`, no build step, no api key. the browser pulls data strai
 - night shading from that day's sunrise and sunset
 - a dashed "now" line; hover or drag across a panel (or focus one and use ← →, shift for a day) to read any hour. it eases back to now when you leave
 - a day/date/hi-lo strip that stays pinned while you scroll
-- click the place name in the heading to change it: type a city, pick from the list (or use your current location). it remembers your choice on that device
+- it opens on your current location when the browser will share it. if location is blocked (or you've turned that off) it opens on the place you last picked, and if you've never picked one, seattle
+- the arrow button next to the theme button turns "start at my current location" on or off. it's remembered per device, and when it's on it checks every 30 minutes whether you've moved
+- click the place name in the heading to change it: type a city, pick from the list (or use your current location). a city you pick is saved as your fallback place on that device. your gps position never overwrites it
 - model picker in the status line: noaa gfs (31 runs), ecmwf (51), google weathernext 2 (64)
 - theme button (next to the model name) cycles: match your device → light → dark. remembered per device
 
@@ -33,7 +35,7 @@ the thin grey runs are deliberately faint. the information they carry (how much 
 
 | param | example | default |
 |---|---|---|
-| `lat`, `lon` | `?lat=53.35&lon=-6.26` | last place you picked, else seattle |
+| `lat`, `lon` | `?lat=53.35&lon=-6.26` (skips current location) | your current location, else last place you picked, else seattle |
 | `name` | `&name=dublin` | `seattle, wa` |
 | `model` | `gfs025`, `ecmwf_ifs025`, `google_weathernext2_ensemble` | `gfs025` |
 | `theme` | `light`, `dark` | your last choice, else follows the device |

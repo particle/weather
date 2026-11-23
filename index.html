@@ -182,7 +182,7 @@ footer a:hover { color: var(--ink); }
         <span class="v" data-k="date" id="date">&nbsp;</span><span aria-hidden="true"> · </span><span class="v" data-k="time" id="time">&nbsp;</span><span aria-hidden="true"> · </span><span class="menu-wrap">
           <button type="button" class="model-btn" id="modelBtn" aria-haspopup="menu" aria-expanded="false"><span id="modelLabel">noaa gfs ensemble</span><span aria-hidden="true"> ▾</span></button>
           <div class="menu" id="menu" role="menu" aria-label="forecast model" hidden></div>
-        </span><span aria-hidden="true"> · </span><button type="button" class="icon-btn" id="themeBtn"></button>
+        </span><span aria-hidden="true"> · </span><button type="button" class="icon-btn" id="themeBtn"></button><button type="button" class="icon-btn" id="followBtn" aria-pressed="true"></button>
       </div>
     </div>
     <div class="current mono">
@@ -252,13 +252,24 @@ footer a:hover { color: var(--ink); }
   const saveSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } };
   const LOC_KEY = 'weather-lines.location';
   const THEME_KEY = 'weather-lines.theme';
+  const FOLLOW_KEY = 'weather-lines.follow';
+  // where to start: ?lat=&lon= → your current location (if allowed and turned on) → saved place → seattle
+  const SEATTLE = { lat: 47.6062, lon: -122.3321, name: 'seattle, wa' };
+  const HERE_NAME = 'my location';
   let saved = null;
   try { saved = JSON.parse(saveGet(LOC_KEY) || 'null'); } catch (e) { saved = null; }
-  const LOC = (num('lat') !== null && num('lon') !== null)
-    ? { lat: num('lat'), lon: num('lon'), name: qs.get('name') || 'custom location' }
-    : (saved && Number.isFinite(saved.lat) && Number.isFinite(saved.lon) && saved.name)
-      ? { lat: saved.lat, lon: saved.lon, name: saved.name }
-      : { lat: 47.6062, lon: -122.3321, name: 'seattle, wa' };
+  const fallback = () => {
+    if (!(saved && Number.isFinite(saved.lat) && Number.isFinite(saved.lon) && saved.name)) return { ...SEATTLE, geo: false };
+    // older versions saved a gps fix as the place; it's only a last-known position now
+    return { lat: saved.lat, lon: saved.lon, name: saved.name === HERE_NAME ? 'last known location' : saved.name, geo: false };
+  };
+  const fromUrl = num('lat') !== null && num('lon') !== null;
+  const LOC = fromUrl
+    ? { lat: num('lat'), lon: num('lon'), name: qs.get('name') || 'custom location', geo: false }
+    : fallback();
+  let follow = saveGet(FOLLOW_KEY) !== 'off';  // on unless you turned it off
+  let geoBlocked = !('geolocation' in navigator);
+  let picked = false;  // you chose a place this visit: a late gps fix shouldn't yank it away
 
   const MODELS = [
     { key: 'gfs025', label: 'noaa gfs', runs: 31 },
@@ -775,7 +786,8 @@ footer a:hover { color: var(--ink); }
     if (!D) { refresh(false); return; }
     const stale = Date.now() - lastFetch >= FETCH_MS;
     const newDay = nowHour() >= 24; // past midnight: re-anchor the chart on today
-    if (stale || newDay) refresh(true);
+    if (stale && follow && LOC.geo) recheckHere().then((moved) => refresh(!moved));
+    else if (stale || newDay) refresh(true);
     else update(true);
   }
 
@@ -872,13 +884,15 @@ footer a:hover { color: var(--ink); }
       drawPlaces();
     }
   }
-  function setLocation(lat, lon, name) {
-    LOC.lat = lat; LOC.lon = lon; LOC.name = name;
-    saveSet(LOC_KEY, JSON.stringify({ lat, lon, name }));
+  // show a place. only places you pick from search are saved; your gps fix never overwrites the saved place
+  function setLocation(lat, lon, name, { geo = false, save = !geo } = {}) {
+    LOC.lat = lat; LOC.lon = lon; LOC.name = name; LOC.geo = geo;
+    if (save) { saved = { lat, lon, name }; saveSet(LOC_KEY, JSON.stringify(saved)); }
     const u = new URL(location.href);
     ['lat', 'lon', 'name'].forEach((k) => u.searchParams.delete(k));
     history.replaceState(null, '', u);
     placeBtn.textContent = name;
+    drawFollow();
     closeEditor();
     // a new place isn't a change in the forecast: no pulses, no carried-over cursor
     prevVals = null; hover = null; glide = null; stopGlide();
@@ -888,19 +902,90 @@ footer a:hover { color: var(--ink); }
   }
   function choose(i) {
     if (i === results.length) {
-      if (!navigator.geolocation) { setHint('this browser can’t share its location'); return; }
-      setHint('finding you…');
-      navigator.geolocation.getCurrentPosition(
-        (pos) => setLocation(+pos.coords.latitude.toFixed(4), +pos.coords.longitude.toFixed(4), 'my location'),
-        () => { if (editing) setHint('location access was declined'); },
-        { timeout: 10000, maximumAge: 600000 });
+      if (!(‘geolocation’ in navigator)) { setHint(‘this browser can’t share its location’); return; }
+      setHint(‘finding you…’);
+      setFollow(true, true);
       return;
     }
     const r = results[i];
-    if (r) setLocation(r.latitude, r.longitude, shortName(r));
+    if (r) { picked = true; setLocation(r.latitude, r.longitude, shortName(r)); }
   }
 
-  placeBtn.addEventListener('click', openEditor);
+  // ---- current location ----
+  // resolves to { lat, lon } or null; never rejects
+  function locate(timeout) {
+    return new Promise((done) => {
+      if (!(‘geolocation’ in navigator)) { geoBlocked = true; done(null); return; }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => { geoBlocked = false; drawFollow(); done({ lat: +pos.coords.latitude.toFixed(4), lon: +pos.coords.longitude.toFixed(4) }); },
+        (err) => { if (err.code === 1) { geoBlocked = true; drawFollow(); } done(null); },
+        { timeout, maximumAge: 10 * 60 * 1000 });
+    });
+  }
+  // ‘granted’ | ‘denied’ | ‘prompt’ | ‘unknown’ (no permissions api)
+  async function geoPermission() {
+    if (!(‘geolocation’ in navigator)) return ‘denied’;
+    try { return (await navigator.permissions.query({ name: ‘geolocation’ })).state; } catch (e) { return ‘unknown’; }
+  }
+  const followBtn = $(‘followBtn’);
+  const FOLLOW_ICON = (on) => ‘<svg viewBox="0 0 18 18" aria-hidden="true" focusable="false"><path d="M15.5 2.5 2.5 8l5.6 1.9L10 15.5z" fill="’ +
+    (on ? ‘currentColor’ : ‘none’) + ‘" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>’;
+  function drawFollow() {
+    followBtn.innerHTML = FOLLOW_ICON(follow && !geoBlocked);
+    followBtn.setAttribute(‘aria-pressed’, String(follow));
+    const state = !follow ? ‘off’ : geoBlocked ? ‘on, but this browser is blocking location’ : ‘on’;
+    followBtn.setAttribute(‘aria-label’, ‘start at my current location: ‘ + state);
+    followBtn.title = ‘start at my current location: ‘ + state;
+  }
+  // turn "start at my current location" on or off. on = find you now; off = go back to the saved place
+  async function setFollow(on, fromPicker = false) {
+    follow = on;
+    saveSet(FOLLOW_KEY, on ? ‘on’ : ‘off’);
+    drawFollow();
+    if (!on) {
+      announce(‘won’t use your current location’);
+      if (LOC.geo) { const f = fallback(); setLocation(f.lat, f.lon, f.name, { save: false }); }
+      return;
+    }
+    if (!fromPicker) announce(‘finding your location…’);
+    const p = await locate(15000);
+    if (!follow) return; // turned off again while waiting
+    if (p) { picked = true; setLocation(p.lat, p.lon, HERE_NAME, { geo: true }); return; }
+    const why = geoBlocked ? ‘location is blocked for this site in your browser settings’ : ‘couldn’t find your location’;
+    if (editing) setHint(why); else announce(why + ‘. showing ‘ + LOC.name);
+  }
+  followBtn.addEventListener(‘click’, () => setFollow(!follow));
+
+  // on load: current location if we can get it, without making you wait or stare at a blank page
+  async function start() {
+    drawFollow();
+    if (fromUrl || !follow) { refresh(false); return; }
+    const perm = await geoPermission();
+    if (perm === ‘denied’) { geoBlocked = true; drawFollow(); refresh(false); return; }
+    if (perm === ‘granted’) {
+      // already allowed: a quick (often cached) fix before the first fetch, so there’s no jump
+      const p = await locate(4000);
+      if (p) { LOC.lat = p.lat; LOC.lon = p.lon; LOC.name = HERE_NAME; LOC.geo = true; }
+      drawFollow();
+      refresh(false);
+      return;
+    }
+    // the browser will ask: show the saved place meanwhile, switch over if you say yes
+    refresh(false);
+    const p = await locate(30000);
+    if (p && follow && !picked) setLocation(p.lat, p.lon, HERE_NAME, { geo: true });
+  }
+  // on a scheduled refresh, notice if you’ve moved (laptop on the road)
+  async function recheckHere() {
+    const p = await locate(10000);
+    if (!p || !follow || !LOC.geo) return false;
+    if (Math.abs(p.lat - LOC.lat) < 0.02 && Math.abs(p.lon - LOC.lon) < 0.02) return false;
+    LOC.lat = p.lat; LOC.lon = p.lon;
+    prevVals = null; hover = null; glide = null; stopGlide();
+    return true;
+  }
+
+  placeBtn.addEventListener(‘click’, openEditor);
   placeInput.addEventListener('input', () => {
     clearTimeout(searchT);
     const q = placeInput.value.trim();
@@ -924,7 +1009,7 @@ footer a:hover { color: var(--ink); }
 
   applyTheme();
   drawMenu();
-  refresh(false);
+  start();
   // tick on the minute so the clock turns over when it should
   setTimeout(() => { tick(); setInterval(tick, CLOCK_MS); }, CLOCK_MS - (Date.now() % CLOCK_MS) + 50);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && D) tick(); });
