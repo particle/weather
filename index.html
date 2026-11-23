@@ -771,10 +771,10 @@ footer a:hover { color: var(--ink); }
     } catch (err) {
       const why = String(err.message || err);
       if (D) {
-        $('fetched').innerHTML = '<span class="err">couldn’t update (' + esc(why) + ') — showing ' + fmtTime(lastFetch + D.offset * 1000) + ' data</span>';
-        if (announceNext) { announceNext = false; announce('couldn’t load that forecast: ' + why); }
+        $('fetched').innerHTML = '<span class="err">couldn\'t update (' + esc(why) + ') — showing ' + fmtTime(lastFetch + D.offset * 1000) + ' data</span>';
+        if (announceNext) { announceNext = false; announce('couldn\'t load that forecast: ' + why); }
       } else {
-        $('msg').textContent = 'couldn’t load the forecast: ' + why + '. retrying in a minute.';
+        $('msg').textContent = 'couldn\'t load the forecast: ' + why + '. retrying in a minute.';
       }
     } finally {
       loading = false;
@@ -881,7 +881,7 @@ footer a:hover { color: var(--ink); }
     } catch (e) {
       if (seq !== searchSeq || !editing) return;
       results = []; sel = -1;
-      setHint('couldn’t search right now');
+      setHint('couldn\'t search right now');
       drawPlaces();
     }
   }
@@ -903,8 +903,8 @@ footer a:hover { color: var(--ink); }
   }
   function choose(i) {
     if (i === results.length) {
-      if (!(‘geolocation’ in navigator)) { setHint(‘this browser can’t share its location’); return; }
-      setHint(‘finding you…’);
+      if (!('geolocation' in navigator)) { setHint('this browser can\'t share its location'); return; }
+      setHint('finding you…');
       setFollow(true, true);
       return;
     }
@@ -916,55 +916,55 @@ footer a:hover { color: var(--ink); }
   // resolves to { lat, lon } or null; never rejects
   function locate(timeout) {
     return new Promise((done) => {
-      if (!(‘geolocation’ in navigator)) { geoBlocked = true; done(null); return; }
+      if (!('geolocation' in navigator)) { geoBlocked = true; done(null); return; }
       navigator.geolocation.getCurrentPosition(
         (pos) => { geoBlocked = false; drawFollow(); done({ lat: +pos.coords.latitude.toFixed(4), lon: +pos.coords.longitude.toFixed(4) }); },
         (err) => { if (err.code === 1) { geoBlocked = true; drawFollow(); } done(null); },
         { timeout, maximumAge: 10 * 60 * 1000 });
     });
   }
-  // ‘granted’ | ‘denied’ | ‘prompt’ | ‘unknown’ (no permissions api)
+  // 'granted' | 'denied' | 'prompt' | 'unknown' (no permissions api)
   async function geoPermission() {
-    if (!(‘geolocation’ in navigator)) return ‘denied’;
-    try { return (await navigator.permissions.query({ name: ‘geolocation’ })).state; } catch (e) { return ‘unknown’; }
+    if (!('geolocation' in navigator)) return 'denied';
+    try { return (await navigator.permissions.query({ name: 'geolocation' })).state; } catch (e) { return 'unknown'; }
   }
-  const followBtn = $(‘followBtn’);
-  const FOLLOW_ICON = (on) => ‘<svg viewBox="0 0 18 18" aria-hidden="true" focusable="false"><path d="M15.5 2.5 2.5 8l5.6 1.9L10 15.5z" fill="’ +
-    (on ? ‘currentColor’ : ‘none’) + ‘" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>’;
+  const followBtn = $('followBtn');
+  const FOLLOW_ICON = (on) => '<svg viewBox="0 0 18 18" aria-hidden="true" focusable="false"><path d="M15.5 2.5 2.5 8l5.6 1.9L10 15.5z" fill="' +
+    (on ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>';
   function drawFollow() {
     followBtn.innerHTML = FOLLOW_ICON(follow && !geoBlocked);
-    followBtn.setAttribute(‘aria-pressed’, String(follow));
-    const state = !follow ? ‘off’ : geoBlocked ? ‘on, but this browser is blocking location’ : ‘on’;
-    followBtn.setAttribute(‘aria-label’, ‘start at my current location: ‘ + state);
-    followBtn.title = ‘start at my current location: ‘ + state;
+    followBtn.setAttribute('aria-pressed', String(follow));
+    const state = !follow ? 'off' : geoBlocked ? 'on, but this browser is blocking location' : 'on';
+    followBtn.setAttribute('aria-label', 'start at my current location: ' + state);
+    followBtn.title = 'start at my current location: ' + state;
   }
   // turn "start at my current location" on or off. on = find you now; off = go back to the saved place
   async function setFollow(on, fromPicker = false) {
     follow = on;
-    saveSet(FOLLOW_KEY, on ? ‘on’ : ‘off’);
+    saveSet(FOLLOW_KEY, on ? 'on' : 'off');
     drawFollow();
     if (!on) {
-      announce(‘won’t use your current location’);
+      announce('won\'t use your current location');
       if (LOC.geo) { const f = fallback(); setLocation(f.lat, f.lon, f.name, { save: false }); }
       return;
     }
-    if (!fromPicker) announce(‘finding your location…’);
+    if (!fromPicker) announce('finding your location…');
     const p = await locate(15000);
     if (!follow) return; // turned off again while waiting
     if (p) { picked = true; setLocation(p.lat, p.lon, HERE_NAME, { geo: true }); return; }
-    const why = geoBlocked ? ‘location is blocked for this site in your browser settings’ : ‘couldn’t find your location’;
-    if (editing) setHint(why); else announce(why + ‘. showing ‘ + LOC.name);
+    const why = geoBlocked ? 'location is blocked for this site in your browser settings' : 'couldn\'t find your location';
+    if (editing) setHint(why); else announce(why + '. showing ' + LOC.name);
   }
-  followBtn.addEventListener(‘click’, () => setFollow(!follow));
+  followBtn.addEventListener('click', () => setFollow(!follow));
 
   // on load: current location if we can get it, without making you wait or stare at a blank page
   async function start() {
     drawFollow();
     if (fromUrl || !follow) { refresh(false); return; }
     const perm = await geoPermission();
-    if (perm === ‘denied’) { geoBlocked = true; drawFollow(); refresh(false); return; }
-    if (perm === ‘granted’) {
-      // already allowed: a quick (often cached) fix before the first fetch, so there’s no jump
+    if (perm === 'denied') { geoBlocked = true; drawFollow(); refresh(false); return; }
+    if (perm === 'granted') {
+      // already allowed: a quick (often cached) fix before the first fetch, so there's no jump
       const p = await locate(4000);
       if (p) { LOC.lat = p.lat; LOC.lon = p.lon; LOC.name = HERE_NAME; LOC.geo = true; }
       drawFollow();
@@ -976,7 +976,7 @@ footer a:hover { color: var(--ink); }
     const p = await locate(30000);
     if (p && follow && !picked) setLocation(p.lat, p.lon, HERE_NAME, { geo: true });
   }
-  // on a scheduled refresh, notice if you’ve moved (laptop on the road)
+  // on a scheduled refresh, notice if you've moved (laptop on the road)
   async function recheckHere() {
     const p = await locate(10000);
     if (!p || !follow || !LOC.geo) return false;
@@ -986,7 +986,7 @@ footer a:hover { color: var(--ink); }
     return true;
   }
 
-  placeBtn.addEventListener(‘click’, openEditor);
+  placeBtn.addEventListener('click', openEditor);
   placeInput.addEventListener('input', () => {
     clearTimeout(searchT);
     const q = placeInput.value.trim();
