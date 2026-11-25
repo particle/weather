@@ -194,6 +194,7 @@ footer a:hover { color: var(--ink); }
         <span>wind <span class="v" data-k="wind" id="nowWind">–</span> mph</span>
         <span>clouds <span class="v" data-k="cloud" id="nowCloud">–</span></span>
         <span>rain <span class="v" data-k="rain" id="nowRain">–</span> in/hr</span>
+        <span id="aqiRow" hidden>aqi <span class="v" data-k="aqi" id="nowAqi">–</span></span>
       </div>
     </div>
   </header>
@@ -237,7 +238,7 @@ footer a:hover { color: var(--ink); }
       <span><svg width="12" height="10" viewBox="0 0 12 10"><rect width="12" height="10" fill="var(--night)" stroke="var(--grid)"/></svg>night</span>
       <span>dashed line = now</span>
     </div>
-    <span><a href="https://open-meteo.com/">weather data by open-meteo.com</a> (cc by 4.0) · <span id="fetched">not yet updated</span> · <button type="button" class="text-btn" id="pauseBtn">pause updates</button></span>
+    <span><a href="https://open-meteo.com/">weather data by open-meteo.com</a> (cc by 4.0), air quality from copernicus cams · <span id="fetched">not yet updated</span> · <button type="button" class="text-btn" id="pauseBtn">pause updates</button></span>
     <span>hover or drag a panel, or tab to one and use the arrow keys (shift or page up/down = a day, home/end = the ends, esc = now)</span>
   </footer>
 </div>
@@ -384,12 +385,29 @@ footer a:hover { color: var(--ink); }
     const sun = new URLSearchParams({
       latitude: LOC.lat, longitude: LOC.lon, daily: 'sunrise,sunset', timezone: 'auto', forecast_days: String(DAYS + 1)
     });
-    const [e, s] = await Promise.all([
+    const [e, s, a] = await Promise.all([
       getJSON('https://ensemble-api.open-meteo.com/v1/ensemble?' + ens),
-      getJSON('https://api.open-meteo.com/v1/forecast?' + sun).catch(() => null)
+      getJSON('https://api.open-meteo.com/v1/forecast?' + sun).catch(() => null),
+      fetchAir().catch(() => null)
     ]);
-    return parse(e, s, model);
+    const d = parse(e, s, model);
+    d.air = a;
+    return d;
   }
+
+  // air quality right now (us aqi). domains=auto picks cams europe (~11 km) in europe, cams global (~45 km) elsewhere
+  async function fetchAir() {
+    const q = new URLSearchParams({
+      latitude: LOC.lat, longitude: LOC.lon, current: 'us_aqi,pm2_5', domains: 'auto', timezone: 'auto'
+    });
+    const j = await getJSON('https://air-quality-api.open-meteo.com/v1/air-quality?' + q);
+    const c = j && j.current;
+    if (!c || !Number.isFinite(c.us_aqi)) return null;
+    return { aqi: Math.round(c.us_aqi), pm25: Number.isFinite(c.pm2_5) ? c.pm2_5 : null };
+  }
+  // us epa categories, shortened to fit the readout
+  const aqiWord = (v) => v <= 50 ? 'good' : v <= 100 ? 'moderate' : v <= 150 ? 'unhealthy for some'
+    : v <= 200 ? 'unhealthy' : v <= 300 ? 'very unhealthy' : 'hazardous';
 
   function extent(rows) {
     let mn = Infinity, mx = -Infinity;
@@ -572,7 +590,8 @@ footer a:hover { color: var(--ink); }
       lo: today.length ? Math.round(Math.min(...today)) + '°' : '–',
       wind: at('wind', (x) => String(Math.round(x))),
       cloud: at('cloud', (x) => Math.round(x) + '%'),
-      rain: at('rain', (x) => x.toFixed(2))
+      rain: at('rain', (x) => x.toFixed(2)),
+      aqi: D.air ? D.air.aqi + ' ' + aqiWord(D.air.aqi) : '–'
     };
     VARS.forEach((v, k) => { vals['p' + k] = at(v.key, v.fmt); });
     D.days.forEach((d, k) => {
@@ -590,6 +609,9 @@ footer a:hover { color: var(--ink); }
     const vals = nowValues();
     const ids = { date: 'date', time: 'time', temp: 'nowTemp', hi: 'nowHi', lo: 'nowLo', wind: 'nowWind', cloud: 'nowCloud', rain: 'nowRain' };
     for (const k in ids) $(ids[k]).textContent = vals[k];
+    $('nowAqi').textContent = vals.aqi;
+    $('aqiRow').hidden = !D.air;
+    $('aqiRow').title = D.air ? 'us air quality index' + (D.air.pm25 !== null ? ', pm2.5 ' + D.air.pm25.toFixed(1) + ' µg/m³' : '') + ' (cams model, updated with the forecast)' : '';
     D.days.forEach((d, k) => {
       const el = document.querySelector('[data-k="d' + k + '"]');
       if (!el) return;

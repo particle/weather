@@ -7,6 +7,7 @@ one static `index.html`, no build step, no api key. the browser pulls data strai
 ## what it shows
 
 - temperature (°f), precipitation (in/hr), wind (mph) and cloud cover (%), hourly for 10 days
+- air quality right now: us aqi and its category next to the other readouts (hover it for pm2.5). it isn't a forecast. it refreshes with the forecast every 30 minutes and hides itself if there's no data
 - night shading from that day's sunrise and sunset
 - a dashed "now" line; hover or drag across a panel (or focus one and use ← →, shift for a day) to read any hour. it eases back to now when you leave
 - a day/date/hi-lo strip that stays pinned while you scroll
@@ -48,4 +49,4 @@ the thin grey runs are deliberately faint. the information they carry (how much 
 
 ## data and attribution
 
-forecast data comes from the open-meteo ensemble api (`ensemble-api.open-meteo.com/v1/ensemble`), sunrise/sunset from their forecast api, and place search from their geocoding api. open-meteo is free for non-commercial use, and its data is licensed cc by 4.0. the footer link covers the attribution.
+forecast data comes from the open-meteo ensemble api (`ensemble-api.open-meteo.com/v1/ensemble`), sunrise/sunset from their forecast api, place search from their geocoding api, and air quality from their air-quality api (`air-quality-api.open-meteo.com/v1/air-quality`, `domains=auto`). that api serves copernicus cams model data: the ~11 km european model in europe, the ~45 km global model everywhere else. it's modeled, not measured at a station, so treat it as "is today a bad air day", not street-level. open-meteo is free for non-commercial use, and its data is licensed cc by 4.0. the footer link covers the attribution.
